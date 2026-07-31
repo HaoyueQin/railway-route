@@ -16,3 +16,10 @@ HANDOVER.md
 # OS
 .DS_Store
 Thumbs.db
+
+# 中间产物 / 缓存（可重新生成）
+tools/review_batch*.txt
+gui-test-screenshots/
+.search_cache.sqlite
+.reasonix/
+.zcode/
