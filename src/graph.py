@@ -322,6 +322,8 @@ class RailwayGraph:
         conns = []
         for (f, t), trains in self.edge_trains.items():
             for te in trains:
+                if te.distance <= 0:
+                    continue  # 里程无效的边（Y 字头旅游列车等数据缺里程）：不参与规划
                 dep = _parse_minutes(te.depart_time)
                 arr = _parse_minutes(te.arrive_time)
                 if arr < dep:

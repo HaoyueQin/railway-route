@@ -370,8 +370,8 @@ def _collect_direct_routes(
                 continue
             code = conn[_CONN_CODE]
             stops = train_stops.get(code)
-            if not stops:
-                continue
+            if not stops or stops[-1][4] == 0:
+                continue  # 全程里程为 0 的车次（数据无效）：不参与直达枚举
             seq_f = conn[_CONN_SEQ]
             pos = next((k for k, st in enumerate(stops)
                         if st[0] == s and st[3] == seq_f), None)
