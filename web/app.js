@@ -112,6 +112,17 @@ document.querySelectorAll("#dd-search-profile .seg-btn").forEach(btn => {
   });
 });
 
+// ── 桌面应用模式：自绘标题栏（pywebview frameless 窗口）──
+if (window.pywebview) {
+  document.body.classList.add("app-mode");
+  const tb = document.getElementById("titlebar");
+  if (tb) tb.hidden = false;
+  const min = document.getElementById("tb-min");
+  const close = document.getElementById("tb-close");
+  if (min) min.addEventListener("click", () => { try { window.pywebview.api.minimize(); } catch (e) {} });
+  if (close) close.addEventListener("click", () => { try { window.pywebview.api.close(); } catch (e) {} });
+}
+
 // ── 时间滚轮（时:分）：
 // 离散滚轮步进（每格 1 单位，跨整值有顿挫脉冲）+ 拖拽惯性吸附
 const ITEM_H = 26;

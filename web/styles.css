@@ -34,6 +34,26 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 /* 时刻/里程等数字一律等宽对齐（tabular-nums）——排版细节决定高级感 */
 .num,.rc-time,.rc-node-time,.rc-arrow-time,.tt-tbl td,.tt-tbl th,.sf-bar input,.sr input[type=number],.inp[type=time]{font-variant-numeric:tabular-nums}
 
+/* ── 桌面应用自绘标题栏（pywebview frameless 模式）── */
+#titlebar{position:fixed;top:0;left:0;right:0;height:40px;z-index:400;display:flex;
+  align-items:stretch;justify-content:space-between;padding-left:16px;
+  background:rgba(255,255,255,.78);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
+#titlebar[hidden]{display:none}
+.tb-brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0;
+  -webkit-app-region:drag;app-region:drag}
+.tb-brand .ic{width:17px;height:17px;color:var(--accent);flex:none}
+.tb-title{font-family:var(--font-serif);font-size:.8rem;font-weight:700;color:var(--ink-2);
+  letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb-actions{display:flex;flex:none}
+.tb-btn{width:46px;border:none;background:transparent;color:var(--ink-2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s;
+  -webkit-app-region:no-drag;app-region:no-drag}
+.tb-btn .ic{width:13px;height:13px}
+.tb-btn:hover{background:rgba(30,41,59,.07);color:var(--ink)}
+.tb-btn.tb-close:hover{background:rgba(220,38,38,.92);color:#fff}
+body.app-mode .nv{top:40px}
+
 /* ── 背景：多色渐变底图 + Canvas 实时流动色块（粉 / 蓝紫 / 青绿）── */
 .bg-flow{position:fixed;inset:0;z-index:-2;overflow:hidden;background:linear-gradient(135deg,#e0e7ff 0%,#fce7f3 40%,#d1fae5 70%,#e0e7ff 100%)}
 #bg-canvas{position:absolute;inset:0;display:block;pointer-events:none}

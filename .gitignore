@@ -23,3 +23,7 @@ gui-test-screenshots/
 .search_cache.sqlite
 .reasonix/
 .zcode/
+# 构建产物
+build/
+dist/
+*.spec

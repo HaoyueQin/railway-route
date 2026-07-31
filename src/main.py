@@ -110,7 +110,15 @@ def typed_route_to_dict(route: RouteResult, score: float = 0) -> dict:
 #  前端为独立静态文件（web/index.html + styles.css + app.js）
 # ═══════════════════════════════════════════════════════
 
-WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
+def _base_dir() -> pathlib.Path:
+    """应用根目录：源码运行时为仓库根，PyInstaller 打包后为 _MEIPASS 解压目录。"""
+    if getattr(sys, "_MEIPASS", None):
+        return pathlib.Path(sys._MEIPASS)
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+WEB_DIR = _base_dir() / "web"
+DATA_DIR = _base_dir() / "data"
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -246,16 +254,69 @@ class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, f, *a): pass
 
 
-def run_gui(graph, matcher, port=8000):
+def _start_server(graph, matcher, port):
+    """启动本地 HTTP 服务（供 GUI / WebView 共用）。"""
     APIHandler.graph = graph; APIHandler.matcher = matcher
     APIHandler.cache = SearchCache()
     APIHandler.data_fp = data_fingerprint("data/output/车次时刻表.csv")
-    s = HTTPServer(("127.0.0.1", port), APIHandler)
+    return HTTPServer(("127.0.0.1", port), APIHandler)
+
+
+def run_gui(graph, matcher, port=8000):
+    s = _start_server(graph, matcher, port)
     url = f"http://127.0.0.1:{port}"
     print(f"\n  GUI: {url}\n")
     webbrowser.open(url)
     try: s.serve_forever()
     except KeyboardInterrupt: print("\n关闭"); s.shutdown()
+
+
+def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
+    """桌面应用模式：pywebview（系统 WebView2）承载现有前端。
+
+    - frameless 无系统边框：前端自绘标题栏（拖动/最小化/关闭），
+      配合 -webkit-app-region 拖拽区，完全自有窗口观感
+    - 无 pywebview 时自动回退浏览器模式
+    """
+    try:
+        import webview  # 第三方可选依赖（pip install pywebview）
+    except ImportError:
+        print("未安装 pywebview（pip install pywebview 可启用桌面窗口），回退浏览器模式")
+        run_gui(graph, matcher, port)
+        return
+    s = _start_server(graph, matcher, port)
+    # 服务在独立线程运行：webview.start() 是主事件循环，不能阻塞在 serve_forever
+    import threading
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{port}"
+    icon = pathlib.Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+    print(f"\n  桌面应用: {url}（关闭窗口即退出）\n")
+
+    class WindowApi:
+        """暴露给前端标题栏的窗口控制（仅最小化/关闭，不泄露其他能力）。"""
+        def minimize(self):
+            try:
+                webview.windows[0].minimize()
+            except Exception:
+                pass
+
+        def close(self):
+            try:
+                webview.windows[0].destroy()
+            except Exception:
+                pass
+
+    try:
+        webview.create_window(
+            title, url,
+            width=1280, height=880, min_size=(980, 640),
+            frameless=True,          # 无系统边框，标题栏由前端自绘
+            background_color="#e0e7ff",
+            js_api=WindowApi(),
+        )
+        webview.start()
+    finally:
+        s.shutdown()
 
 
 def main():
@@ -269,7 +330,9 @@ def main():
                    help="目的端独立匹配模式（默认跟随 --match-mode）")
     p.add_argument("--search-profile", choices=["fast", "balanced", "thorough", "complete"], default="balanced")
     p.add_argument("--depart-after", default=""); p.add_argument("--depart-before", default="")
-    p.add_argument("--arrive-before", default=""); p.add_argument("--gui", action="store_true")
+    p.add_argument("--arrive-before", default=""); p.add_argument("--gui", action="store_true",
+                   help="浏览器模式（无 pywebview 时的回退）")
+    p.add_argument("--app", action="store_true", help="桌面应用模式（pywebview 承载，推荐）")
     p.add_argument("--port", type=int, default=8000); p.add_argument("--max", type=int, default=15)
     p.add_argument("--same-transfer", type=int, default=DEFAULT_SAME_TRANSFER_MINUTES)
     p.add_argument("--inter-transfer", type=int, default=DEFAULT_INTER_TRANSFER_MINUTES)
@@ -279,10 +342,13 @@ def main():
 
     print("加载全国铁路网络...", end=" ", flush=True); t0 = time.time()
     graph = RailwayGraph()
-    graph.build(csv_path="data/output/车次时刻表.csv", station_js_path="data/timetable/station_name.js")
+    graph.build(csv_path=str(DATA_DIR / "output" / "车次时刻表.csv"),
+                station_js_path=str(DATA_DIR / "timetable" / "station_name.js"))
     matcher = build_matcher(graph, "data/timetable/station_name.js")
     print(f"({time.time()-t0:.1f}s)")
 
+    if a.app or getattr(sys, "frozen", False):
+        run_app(graph, matcher, a.port); return
     if a.gui: run_gui(graph, matcher, a.port); return
 
     try:
