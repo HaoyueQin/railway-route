@@ -318,7 +318,7 @@ def main():
     rng.shuffle(all_stations)
     hot = [n for n in all_stations if len(graph.out_conns[graph.station_to_idx[n]]) >= 50]
     cold = [n for n in all_stations if len(graph.out_conns[graph.station_to_idx[n]]) < 50]
-    for _ in range(80):
+    for _ in range(130):
         pool = hot if rng.random() < 0.6 else cold
         frm, to = rng.sample(pool, 2)
         prof = rng.choice(["fast", "balanced", "balanced", "thorough"])

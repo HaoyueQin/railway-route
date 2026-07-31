@@ -82,7 +82,7 @@ def main():
     combos = [(*p, "balanced") for p in PAIRS]
     combos += [(*p, "fast") for p in PAIRS[:12]]
     combos += [(*p, "complete") for p in PAIRS[12:20]]
-    for _ in range(80):
+    for _ in range(130):
         pool = hot if rng.random() < 0.6 else cold
         frm, to = rng.sample(pool, 2)
         prof = rng.choice(["fast", "balanced", "balanced", "thorough"])
