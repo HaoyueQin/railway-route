@@ -113,15 +113,36 @@ document.querySelectorAll("#dd-search-profile .seg-btn").forEach(btn => {
 });
 
 // ── 桌面应用模式：自绘标题栏（pywebview frameless 窗口）──
-if (window.pywebview) {
+// 三重保障确保标题栏一定显示：
+//   1) JS 桥已就绪（window.pywebview 立即可用）
+//   2) pywebviewready 事件（桥注入晚于页面脚本时的标准时序）
+//   3) 打包 URL 显式携带 ?app=1（run_app 加载时附加，兜底）
+function initAppMode() {
+  if (document.body.classList.contains("app-mode")) return;
   document.body.classList.add("app-mode");
   const tb = document.getElementById("titlebar");
   if (tb) tb.hidden = false;
   const min = document.getElementById("tb-min");
+  const maxBtn = document.getElementById("tb-max");
   const close = document.getElementById("tb-close");
   if (min) min.addEventListener("click", () => { try { window.pywebview.api.minimize(); } catch (e) {} });
   if (close) close.addEventListener("click", () => { try { window.pywebview.api.close(); } catch (e) {} });
+  // 最大化/还原：点击切换图标，双击标题栏拖动区也可切换（Windows 习惯）
+  if (maxBtn) maxBtn.addEventListener("click", () => {
+    try {
+      window.pywebview.api.toggle_maximize();
+      maxBtn.classList.toggle("maxed");
+      maxBtn.title = maxBtn.classList.contains("maxed") ? "还原" : "最大化";
+    } catch (e) {}
+  });
+  if (tb) {
+    const brand = tb.querySelector(".tb-brand");
+    if (brand) brand.addEventListener("dblclick", () => maxBtn && maxBtn.click());
+  }
 }
+if (window.pywebview) initAppMode();
+window.addEventListener("pywebviewready", initAppMode);
+if (new URLSearchParams(location.search).has("app")) initAppMode();
 
 // ── 时间滚轮（时:分）：
 // 离散滚轮步进（每格 1 单位，跨整值有顿挫脉冲）+ 拖拽惯性吸附

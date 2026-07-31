@@ -50,6 +50,9 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
   display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s;
   -webkit-app-region:no-drag;app-region:no-drag}
 .tb-btn .ic{width:13px;height:13px}
+.tb-btn .ic-restore{display:none}
+.tb-btn.maxed .ic-max{display:none}
+.tb-btn.maxed .ic-restore{display:block}
 .tb-btn:hover{background:rgba(30,41,59,.07);color:var(--ink)}
 .tb-btn.tb-close:hover{background:rgba(220,38,38,.92);color:#fff}
 body.app-mode .nv{top:40px}

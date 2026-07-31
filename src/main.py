@@ -331,10 +331,21 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
     print(f"\n  桌面应用: {url}（关闭窗口即退出）\n")
 
     class WindowApi:
-        """暴露给前端标题栏的窗口控制（仅最小化/关闭，不泄露其他能力）。"""
+        """暴露给前端标题栏的窗口控制（仅窗口控制，不泄露其他能力）。"""
         def minimize(self):
             try:
                 webview.windows[0].minimize()
+            except Exception:
+                pass
+
+        def toggle_maximize(self):
+            """最大化 ↔ 还原（pywebview 6.x Window.state 报告当前窗口状态）。"""
+            try:
+                w = webview.windows[0]
+                if w.state == "maximized":
+                    w.restore()
+                else:
+                    w.maximize()
             except Exception:
                 pass
 
@@ -346,7 +357,7 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
 
     try:
         webview.create_window(
-            title, url,
+            title, url + "?app=1",  # ?app=1: 前端自绘标题栏的显式信号（不依赖 JS 桥注入时序）
             width=1280, height=880, min_size=(980, 640),
             frameless=True,          # 无系统边框，标题栏由前端自绘
             background_color="#e0e7ff",
