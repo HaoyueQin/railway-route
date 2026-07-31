@@ -178,9 +178,16 @@ python src/main.py --gui --port 8765
 3. 开行日期过滤；
 4. exe 数字签名（消除 SmartScreen 提示）。
 
-## 数据来源与致谢
+## 数据来源与获取方式
 
-- [路路通时刻表](http://www.lltskb.com) — 离线时刻表数据来源；
+**数据文件不入库**（`data/` 已整体加入 `.gitignore`），运行前需自行获取：
+
+1. 安装/打开[路路通时刻表](http://www.lltskb.com)客户端，在其安装目录下取得离线数据文件（`t0.dat~t19.dat`、`s.i`、`s0~s9.dat`、`station_name.js` 等）；
+2. 将上述文件放入 `data/timetable/`；
+3. 执行 `python tools/parse_timetable.py --all` 全量导出 `data/output/车次时刻表.csv`（纯离线解析，详见该脚本头部说明）。
+
+依赖的格式逆向资料：
+
 - [shandongtlb/lltskb-tools](https://github.com/shandongtlb/lltskb-tools) — 二进制格式逆向与解析参考；
 - [MichealWangYZ/lltskb-rail-query](https://github.com/MichealWangYZ/lltskb-rail-query) — 格式资料与工具参考。
 

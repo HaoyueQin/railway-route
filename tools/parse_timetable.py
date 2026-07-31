@@ -6,7 +6,7 @@
 来源: https://github.com/shandongtlb/lltskb-tools (shanongtlb)
 协议: 本项目使用该工具用于个人学习/研究铁路数据。
 
-—— 数据链（全部离线，详见 docs/FINDINGS.md §6）：
+—— 数据链（全部离线）：
   t.i  : readShort(车次数) + N×readUTF  → 车次全局 index → 车次名（有序）
   s.i  : 同结构                          → 站点 index    → 站名
   sp.dat: 每车次 12306 train_no（可选，本模块不依赖）
