@@ -115,6 +115,7 @@ document.querySelectorAll("#dd-search-profile .seg-btn").forEach(btn => {
 // ── 时间滚轮（时:分）：
 // 离散滚轮步进（每格 1 单位，跨整值有顿挫脉冲）+ 拖拽惯性吸附
 const ITEM_H = 26;
+const RULE_TOP = 52;   // 选中行顶部距可视区顶部（= (130 - 26) / 2，选中数字居中）
 const WHEEL_ITEMS = { h: 24, m: 60 };   // 小时 0-23 / 分钟 0-59
 const _wheelState = { same: { h: 0, m: 15 }, inter: { h: 1, m: 0 } };
 _form.sameMin = 15; _form.interMin = 60;
@@ -150,7 +151,7 @@ function initWheel(rowId, key, onChange) {
       itemsEl.querySelectorAll(".wheel-item").forEach(it => it.classList.toggle("sel", +it.dataset.v === v));
     };
     const render = () => {
-      itemsEl.style.setProperty("--wy", (-(pos) * ITEM_H) + "px");
+      itemsEl.style.setProperty("--wy", (RULE_TOP - pos * ITEM_H) + "px");
       // 高亮可视区内最接近选中线的项
       setSel(Math.max(0, Math.min(max, Math.round(pos))));
     };

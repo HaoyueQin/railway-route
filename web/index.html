@@ -87,16 +87,24 @@
             <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v5M16 3v5M3 8h18M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M9 13h6M9 17h4"/></svg>
             换乘设置
           </div>
-          <div class="g g3">
+          <div class="xfer-grid">
             <div class="fld"><label class="fld-lbl">同站换乘</label>
-              <div class="wheel-row" id="same-wheel"><div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-colon">:</span><div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时:分</span></div></div>
+              <div class="wheel-row" id="same-wheel">
+                <div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时</span><span class="wheel-colon">:</span>
+                <div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">分</span>
+              </div></div>
             <div class="fld"><label class="fld-lbl">异站换乘</label>
-              <div class="wheel-row" id="inter-wheel"><div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-colon">:</span><div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时:分</span></div></div>
-            <div class="fld"><label class="fld-lbl">最大换乘</label>
-              <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>
+              <div class="wheel-row" id="inter-wheel">
+                <div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时</span><span class="wheel-colon">:</span>
+                <div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">分</span>
+              </div></div>
+            <div class="xfer-side">
+              <div class="fld"><label class="fld-lbl">最大换乘</label>
+                <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>
+              <div class="fld"><label class="fld-lbl" for="xfer-at">指定换乘城市（留空 = 不限）</label>
+                <input id="xfer-at" class="inp" placeholder="如：武汉 / 郑州" autocomplete="off"></div>
+            </div>
           </div>
-          <div class="g"><div class="fld"><label class="fld-lbl" for="xfer-at">指定换乘城市（留空 = 不限）</label>
-            <input id="xfer-at" class="inp" placeholder="如：武汉 / 郑州" autocomplete="off"></div></div>
         </div>
       </div>
       <div class="adv-row">
