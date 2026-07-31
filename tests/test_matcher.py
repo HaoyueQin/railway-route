@@ -28,9 +28,29 @@ class MatcherStationSetTest(unittest.TestCase):
     def test_exact_mode_returns_one_station(self):
         self.assertEqual(resolve_station_set("甲站", "exact", self.graph, self.matcher), ["甲站"])
 
-    def test_fuzzy_mode_expands_explicit_station_to_city(self):
+    def test_fuzzy_mode_sparse_station_expands_to_city(self):
+        """新语义（贴近生活）：站名精确但出发班次稀疏（fixture 甲站仅 1 班 < 25）
+        时视为区级可用性，扩散到所属市全部站（怀柔/广阳同理）。"""
         self.assertEqual(
             set(resolve_station_set("甲站", "fuzzy", self.graph, self.matcher)),
+            {"甲站", "甲东"},
+        )
+
+    def test_fuzzy_mode_expands_city_name_to_all_stations(self):
+        """城市名（甲城）→ 全市全部站。"""
+        self.assertEqual(
+            set(resolve_station_set("甲城", "fuzzy", self.graph, self.matcher)),
+            {"甲站", "甲东"},
+        )
+
+    def test_fuzzy_mode_no_same_name_station_expands_to_city(self):
+        """无同名站的地名（区/镇级，如通州→北京）→ 归并到所属城市全部站。"""
+        self.assertEqual(
+            set(resolve_station_set("甲东", "fuzzy", self.graph, self.matcher)),
+            {"甲站", "甲东"},
+        )
+        self.assertEqual(
+            set(resolve_station_set("甲城", "fuzzy", self.graph, self.matcher)),
             {"甲站", "甲东"},
         )
 

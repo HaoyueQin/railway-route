@@ -83,8 +83,14 @@ class RailwayGraph:
         self.same_city_of: dict[int, list[int]] = defaultdict(list)
         # 出发索引: station_idx → [(train_code, seq, depart_time), ...]
         self.departures: dict[int, list[tuple[str, int, str]]] = defaultdict(list)
+        # 车次全程停站: train_code → [(station_idx, dep_min, arr_min, seq, dist_cum), ...]
+        # 供前端显示始发终到站、上/下一站时刻与完整时刻表（构建期填充）
+        self.train_stops: dict[str, list[tuple]] = {}
         # 预排序 Connection 列表（供 CSA 直接使用，build() 后填充）
         self.sorted_connections: list = []
+        # 按出发站分桶的双日 Connection（桶内按 depart_minutes 升序，build() 后填充）
+        # CSA 主循环用堆归并只迭代"有标签的站"，避免全量扫描所有连接
+        self.out_conns: list[list] = []
         # 目标站 → 各站最短铁路距离（反向 Dijkstra 结果）
         self.distance_cache: dict[int, dict[int, float]] = {}
 
@@ -159,6 +165,30 @@ class RailwayGraph:
         for code, stops in train_stops.items():
             # 按序号排序
             stops.sort(key=lambda s: int(s["序号"]))
+
+            # 车次全程停站（供前端显示始发终到站 / 上站上一站·下站下一站时刻）
+            # (station_idx, dep_min, arr_min, seq, dist_cum)；始发无到达/终到无发车记 -1；
+            # 同一车次内时刻单调递增（跨午夜 +1440，慢车可跨多天）
+            full_stops: list[tuple] = []
+            offset = 0
+            prev_time = -1
+            for st in stops:
+                dep_raw = st["发车"].strip()
+                arr_raw = st["到达"].strip()
+                dep_m = _parse_minutes(dep_raw) if dep_raw else -1
+                arr_m = _parse_minutes(arr_raw) if arr_raw else -1
+                if dep_m != -1 and prev_time != -1:
+                    while dep_m + offset <= prev_time:
+                        offset += 1440
+                if arr_m != -1:
+                    while arr_m + offset <= prev_time:
+                        offset += 1440
+                    prev_time = arr_m + offset
+                st_idx = self._get_or_create_station(st["站名"])
+                full_stops.append((st_idx, dep_m + offset if dep_m != -1 else -1,
+                                   arr_m + offset if arr_m != -1 else -1,
+                                   int(st["序号"]), int(st["里程km"])))
+            self.train_stops[code] = full_stops
 
             # 相邻停站 → 边
             for i in range(len(stops) - 1):
@@ -305,11 +335,20 @@ class RailwayGraph:
                     ))
         conns.sort(key=lambda c: c[0])
         self.sorted_connections = conns
+        # 按出发站分桶：conns 已按 dep 全局排序，桶内自然有序
+        buckets: list[list] = [[] for _ in range(self.station_count)]
+        for conn in conns:
+            buckets[conn[2]].append(conn)
+        self.out_conns = buckets
 
     # ── 查询 ────────────────────────────────────────────
 
     def get_reverse_distances(self, target: int) -> dict[int, float]:
-        """返回各站到 target 的最短铁路距离，并由当前图实例缓存。"""
+        """返回各站到 target 的最短铁路距离，并由当前图实例缓存。
+
+        跳过里程为 0 的运行边：部分车次（如旅游列车）里程数据缺失为 0，
+        作为下界会制造"免费捷径"（如 衡水→兰州 0km），使绕路过滤/剪枝失真。
+        """
         cached = self.distance_cache.get(target)
         if cached is not None:
             return cached
@@ -321,6 +360,8 @@ class RailwayGraph:
             if distance > distances.get(current, float("inf")):
                 continue
             for previous, info in self.reverse_edges.get(current, {}).items():
+                if info.distance <= 0:
+                    continue  # 里程缺失段不作为距离下界
                 candidate = distance + info.distance
                 if candidate < distances.get(previous, float("inf")):
                     distances[previous] = candidate
@@ -328,6 +369,41 @@ class RailwayGraph:
 
         self.distance_cache[target] = distances
         return distances
+
+    def _reverse_dijkstra(self, sources: list[int], attr: str) -> dict[int, float]:
+        """反向多源 Dijkstra：各站到 sources 中任一目标的最小代价。
+
+        attr: "distance"（铁路里程）或 "min_time"（最快运行时间下界）。
+        跳过代价为 0 的运行边（数据缺失段不作为下界，避免假捷径）。
+        不缓存（单次调用约 10ms，由 csa 每次查询调用一次）。
+        """
+        distances: dict[int, float] = {s: 0.0 for s in sources}
+        heap = [(0.0, s) for s in sources]
+        heapq.heapify(heap)
+        while heap:
+            cost, current = heapq.heappop(heap)
+            if cost > distances.get(current, float("inf")):
+                continue
+            for previous, info in self.reverse_edges.get(current, {}).items():
+                edge_cost = getattr(info, attr)
+                if edge_cost <= 0:
+                    continue  # 数据缺失段不作为下界
+                candidate = cost + edge_cost
+                if candidate < distances.get(previous, float("inf")):
+                    distances[previous] = candidate
+                    heapq.heappush(heap, (candidate, previous))
+        return distances
+
+    def get_multi_source_distances(self, targets: list[int]) -> dict[int, float]:
+        """各站到任一目标站的最短铁路距离（多目标质量改进）。"""
+        return self._reverse_dijkstra(targets, "distance")
+
+    def get_multi_source_times(self, targets: list[int]) -> dict[int, float]:
+        """各站到任一目标站的最快运行时间下界（目标导向剪枝用）。
+
+        下界基于区段最快列车耗时，不含换乘缓冲与地面移动，恒不大于真实剩余时间。
+        """
+        return self._reverse_dijkstra(targets, "min_time")
 
     def get_edge_info(self, from_idx: int, to_idx: int) -> Optional[EdgeInfo]:
         """获取运行边摘要信息。"""

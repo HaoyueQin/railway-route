@@ -10,18 +10,20 @@ SearchProfile = Literal["fast", "balanced", "thorough", "complete"]
 
 @dataclass(frozen=True)
 class SearchProfileSettings:
-    max_states_per_station: Optional[int]
+    max_states_per_station: Optional[int]  # 每轮每站的标签上限（轮次化 CSA）
     max_results: Optional[int]
-    use_relaxed_dominance: bool
+    use_relaxed_dominance: bool  # 保留字段（轮次化后轮内为严格 Pareto）
     default_timeout_seconds: int = 60
     state_limit: int = 1_000_000
+    time_prune_slack: Optional[int] = None  # 目标导向耗时剪枝松弛（分钟）；None = 不剪
 
 
 SEARCH_PROFILES: dict[str, SearchProfileSettings] = {
-    "fast": SearchProfileSettings(8, None, True, 15, 200_000),
-    "balanced": SearchProfileSettings(20, None, True, 30, 500_000),
-    "thorough": SearchProfileSettings(80, None, False, 60, 1_500_000),
-    "complete": SearchProfileSettings(None, None, False, 120, 5_000_000),
+    "fast": SearchProfileSettings(4, None, True, 15, 200_000, 240),
+    "balanced": SearchProfileSettings(8, None, True, 30, 1_500_000, 300),
+    "thorough": SearchProfileSettings(16, None, False, 60, 3_000_000, 420),
+    # complete 保留大标签上限与宽松时间窗（12h），仍受 state_limit 兜底
+    "complete": SearchProfileSettings(24, None, False, 120, 8_000_000, 720),
 }
 
 
@@ -30,6 +32,9 @@ class SearchRequest:
     from_query: str
     to_query: str
     match_mode: MatchMode = "fuzzy"
+    # 每端独立匹配模式（None = 跟随 match_mode）：如 from_mode="exact" + to_mode="fuzzy"
+    from_mode: Optional[MatchMode] = None
+    to_mode: Optional[MatchMode] = None
     search_profile: SearchProfile = "balanced"
     earliest_depart: int = 0
     latest_depart: int = 2880

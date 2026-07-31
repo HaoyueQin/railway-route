@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>铁路出行路径规划</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="bg-flow" aria-hidden="true">
+  <canvas id="bg-canvas"></canvas>
+</div>
+
+<nav class="nv"><div class="nv-in">
+  <span class="nv-logo">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 9h14M9 3v6M15 3v6M8 17l-2 4M16 17l2 4"/></svg>
+    铁路出行路径规划
+  </span>
+  <span class="nv-sub">全国铁路出行方案 · 14,173 车次 · 3,305 车站</span>
+</div></nav>
+
+<div class="hero">
+  <div class="hero-inner">
+    <h1>铁路出行路径规划</h1>
+    <p>输入出发与目的站，一站式对比直达与换乘方案 · 支持同城多站与异站换乘 · 覆盖全国铁路时刻表</p>
+  </div>
+</div>
+
+<main class="app">
+
+<section class="search-card">
+  <div class="search-row">
+    <div class="station-box">
+      <label class="s-label" for="from">出发站 / 城市</label>
+      <div class="s-input-wrap">
+        <input id="from" class="inp" placeholder="如：北京 / 北京南" autocomplete="off">
+        <button type="button" class="end-mode" id="from-mode" title="点击切换：该端全部站 / 仅本站">全部站</button>
+      </div>
+      <div id="from-sugg" class="sgs"></div>
+    </div>
+    <button type="button" class="swap-btn" id="btn-swap" title="交换起终点" aria-label="交换起终点">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16l-4-4 4-4"/><path d="M3 12h14"/><path d="M17 8l4 4-4 4"/><path d="M21 12H7"/></svg>
+    </button>
+    <div class="station-box">
+      <label class="s-label" for="to">目的站 / 城市</label>
+      <div class="s-input-wrap">
+        <input id="to" class="inp" placeholder="如：上海 / 上海虹桥" autocomplete="off">
+        <button type="button" class="end-mode" id="to-mode" title="点击切换：该端全部站 / 仅本站">全部站</button>
+      </div>
+      <div id="to-sugg" class="sgs"></div>
+    </div>
+    <div class="search-cta">
+      <button class="bt" id="btn-search" type="button">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        搜索出行方案
+      </button>
+    </div>
+  </div>
+
+  <div class="adv-toggle" id="adv-toggle">
+    <button type="button" class="adv-btn" aria-expanded="false">
+      <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      高级选项 <span class="adv-caret" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <div class="adv-panel" id="adv-panel">
+    <div class="adv-inner">
+      <div class="adv-row">
+        <div class="adv-group">
+          <div class="adv-hd">
+            <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            时间约束 <span class="adv-hint">（留空 = 全天）</span>
+          </div>
+          <div class="adv-grid2">
+            <div class="fld"><label class="fld-lbl" for="dep-after">出发不早于</label><input id="dep-after" class="inp" type="time"></div>
+            <div class="fld"><label class="fld-lbl" for="dep-before">出发不晚于</label><input id="dep-before" class="inp" type="time"></div>
+            <div class="fld"><label class="fld-lbl" for="arr-after">到达不早于</label><input id="arr-after" class="inp" type="time"></div>
+            <div class="fld"><label class="fld-lbl" for="arr-before">到达不晚于</label><input id="arr-before" class="inp" type="time"></div>
+          </div>
+        </div>
+      </div>
+      <div class="adv-row">
+        <div class="adv-group">
+          <div class="adv-hd">
+            <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v5M16 3v5M3 8h18M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M9 13h6M9 17h4"/></svg>
+            换乘设置
+          </div>
+          <div class="g g3">
+            <div class="fld"><label class="fld-lbl">同站换乘</label>
+              <div class="wheel-row" id="same-wheel"><div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-colon">:</span><div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时:分</span></div></div>
+            <div class="fld"><label class="fld-lbl">异站换乘</label>
+              <div class="wheel-row" id="inter-wheel"><div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-colon">:</span><div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时:分</span></div></div>
+            <div class="fld"><label class="fld-lbl">最大换乘</label>
+              <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>
+          </div>
+          <div class="g"><div class="fld"><label class="fld-lbl" for="xfer-at">指定换乘城市（留空 = 不限）</label>
+            <input id="xfer-at" class="inp" placeholder="如：武汉 / 郑州" autocomplete="off"></div></div>
+        </div>
+      </div>
+      <div class="adv-row">
+        <div class="adv-group">
+          <div class="adv-hd">
+            <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            搜索强度
+          </div>
+          <div class="seg" id="dd-search-profile" role="group" aria-label="搜索档位">
+            <button type="button" class="seg-btn" data-v="fast">快速</button>
+            <button type="button" class="seg-btn sel" data-v="balanced">均衡</button>
+            <button type="button" class="seg-btn" data-v="thorough">全面</button>
+            <button type="button" class="seg-btn" data-v="complete">完整</button>
+          </div>
+          <div class="adv-hint2">档位越高搜索越完整，耗时越长</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="results"></div>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

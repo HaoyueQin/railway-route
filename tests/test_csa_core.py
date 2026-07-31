@@ -103,22 +103,31 @@ class MultiStationTest(unittest.TestCase):
         self.assertEqual(resp.source_stations, ("甲站",))
         self.assertEqual(resp.target_stations, ("乙站",))
 
-    def test_fuzzy_expands_to_city_stations(self):
+    def test_fuzzy_expands_city_name_to_all_stations(self):
         graph, matcher, tmp = _make_two_city_fixture()
         self.addCleanup(tmp.cleanup)
-        req = SearchRequest(from_query="甲站", to_query="乙站", match_mode="fuzzy")
+        # 城市名 fuzzy → 全市全部站；站名 fuzzy → 单站（新语义：有站的县级地名不扩散）
+        req = SearchRequest(from_query="甲城", to_query="乙城", match_mode="fuzzy")
         resp = csa_search(graph, req, matcher)
-        # fuzzy 模式下甲站→甲城全部站（甲站、甲东），乙站→乙城全部站（乙站、乙西）
         self.assertEqual(set(resp.source_stations), {"甲站", "甲东"})
         self.assertEqual(set(resp.target_stations), {"乙站", "乙西"})
         self.assertGreaterEqual(len(resp.routes), 2)  # 至少 A1→B1 和 A2→B2
 
-    def test_fuzzy_finds_faster_route_via_other_station(self):
+    def test_fuzzy_sparse_station_expands_to_city(self):
         graph, matcher, tmp = _make_two_city_fixture()
         self.addCleanup(tmp.cleanup)
         req = SearchRequest(from_query="甲站", to_query="乙站", match_mode="fuzzy")
         resp = csa_search(graph, req, matcher)
-        # 最佳路线应是 A2→B2 (2h) 而非 A1→B1 (4h)
+        # fixture 各站仅 1 班车（<25）→ 视为区级可用性扩散同城（怀柔/广阳语义）
+        self.assertEqual(set(resp.source_stations), {"甲站", "甲东"})
+        self.assertEqual(set(resp.target_stations), {"乙站", "乙西"})
+
+    def test_fuzzy_finds_faster_route_via_other_station(self):
+        graph, matcher, tmp = _make_two_city_fixture()
+        self.addCleanup(tmp.cleanup)
+        # 城市名 fuzzy 展开多站：最佳路线 A2→B2 (2h)
+        req = SearchRequest(from_query="甲城", to_query="乙城", match_mode="fuzzy")
+        resp = csa_search(graph, req, matcher)
         best = resp.routes[0]
         self.assertEqual(best.actual_origin, "甲东")
         self.assertEqual(best.actual_destination, "乙西")
@@ -275,7 +284,9 @@ class SearchProfileTest(unittest.TestCase):
         self.assertIsNotNone(SEARCH_PROFILES["fast"].max_states_per_station)
         self.assertIsNotNone(SEARCH_PROFILES["balanced"].max_states_per_station)
         self.assertIsNotNone(SEARCH_PROFILES["thorough"].max_states_per_station)
-        self.assertIsNone(SEARCH_PROFILES["complete"].max_states_per_station)
+        # complete 每轮每站上限最大（受 state_limit 兜底）
+        self.assertGreater(SEARCH_PROFILES["complete"].max_states_per_station,
+                           SEARCH_PROFILES["thorough"].max_states_per_station)
         self.assertTrue(SEARCH_PROFILES["fast"].use_relaxed_dominance)
         self.assertTrue(SEARCH_PROFILES["balanced"].use_relaxed_dominance)
         self.assertFalse(SEARCH_PROFILES["complete"].use_relaxed_dominance)

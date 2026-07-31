@@ -21,6 +21,9 @@ class MatcherData:
     station_to_city_code: dict[str, str]
     city_name_to_code: dict[str, str]
     city_code_to_name: dict[str, str]
+    # 预计算的站名规范化（避免每次查询重复 strip 全部站点）
+    station_clean: dict[str, str] = None       # 站名 → 全后缀剥离
+    station_no_suffix: dict[str, str] = None   # 站名 → 单后缀剥离
 
 
 def build_matcher(graph, station_js_path: str) -> MatcherData:
@@ -63,6 +66,13 @@ def build_matcher(graph, station_js_path: str) -> MatcherData:
         if pinyin:
             pinyin_to_names[pinyin.lower()].append(name)
 
+    station_clean = {
+        name: _strip_all_suffixes(name.lower()) for name in all_stations
+    }
+    station_no_suffix = {
+        name: _strip_suffix(name.lower()) for name in all_stations
+    }
+
     return MatcherData(
         all_stations=all_stations,
         city_to_stations=dict(city_to_stations),
@@ -71,6 +81,8 @@ def build_matcher(graph, station_js_path: str) -> MatcherData:
         station_to_city_code=station_to_city_code,
         city_name_to_code=city_name_to_code,
         city_code_to_name=city_code_to_name,
+        station_clean=station_clean,
+        station_no_suffix=station_no_suffix,
     )
 
 
@@ -126,20 +138,20 @@ def fuzzy_match(query: str, graph, matcher: MatcherData) -> list[tuple[int, str]
             add(170, name)
 
     for station in matcher.all_stations:
-        station_clean = _strip_all_suffixes(station.lower())
-        station_no_suffix = _strip_suffix(station.lower())
+        station_clean = matcher.station_clean[station]
+        station_no_suffix = matcher.station_no_suffix[station]
         if q_clean == station_no_suffix or q_clean == station_clean:
             add(160, station)
 
     for station in matcher.all_stations:
-        station_clean = _strip_all_suffixes(station.lower())
+        station_clean = matcher.station_clean[station]
         if len(station_clean) >= 2 and q_clean.endswith(station_clean):
             add(140 + len(station_clean) * 2, station)
         elif len(q_clean) >= 2 and station_clean.endswith(q_clean):
             add(135 + len(q_clean) * 2, station)
 
     for station in matcher.all_stations:
-        station_clean = _strip_all_suffixes(station.lower())
+        station_clean = matcher.station_clean[station]
         if len(q_clean) >= 2 and q_clean in station_clean:
             add(120 + len(q_clean), station)
         elif len(station_clean) >= 2 and station_clean in q_clean:
@@ -176,14 +188,69 @@ def resolve_city_code(query: str, graph, matcher: MatcherData) -> str:
     return city_code
 
 
+# 站名"可用性"阈值：出发车次 >= 该值时视为班次充足的独立车站（如燕郊 43 班、新县 35 班），
+# 模糊输入按单站处理；班次稀疏的站（怀柔 10 班、广阳 17 班）视为区级地名，扩散到所属市
+MIN_STATION_TRAINS_FOR_SINGLE = 25
+
+
 def resolve_station_set(query: str, mode: str, graph, matcher: MatcherData) -> list[str]:
-    """按 exact/fuzzy 模式解析单站或同城全部有效站。"""
+    """按 exact/fuzzy 模式解析单站或同城全部有效站。
+
+    fuzzy 的贴近生活规则（2026-07 修正，兼顾区/县/镇的行政级别语义）：
+    1. 输入是**城市名**（信阳/北京/廊坊）→ 该市全部站；
+    2. 带"区"后缀（怀柔区/广阳区）→ 区级地名 → 归并到所属市全部站；
+    3. 带"县/镇/乡"后缀 → 县级地名 → 单站（有站时）；
+    4. 无后缀但图中存在该站名：
+       - 站名以所属城市名开头（北京南/信阳东）→ 明确站意图 → 单站；
+       - 出发车次 >= 25（燕郊/新县）→ 班次充足 → 单站；
+       - 班次稀疏（怀柔/广阳）→ 区级可用性 → 扩散到所属市；
+    5. 否则既有模糊匹配（通州→北京通州→北京市全部站）。
+    """
     if mode == "exact":
         return [resolve_single(query, graph, matcher)]
     if mode != "fuzzy":
         raise ValueError(f"未知匹配模式: {mode}")
 
-    city_code = resolve_city_code(query, graph, matcher)
+    q = query.strip()
+
+    # 规则 1：城市名（去行政后缀）→ 全市扩散
+    city_code = matcher.city_name_to_code.get(_strip_all_suffixes(q.lower()))
+    if city_code:
+        stations = matcher.city_to_stations.get(city_code, [])
+        if stations:
+            return list(stations)
+
+    # 规则 2：带"区"后缀 → 区级地名归并所属市（怀柔区/广阳区 → 北京/廊坊）
+    if q.endswith("区") and q[:-1] in graph.station_to_idx:
+        idx = graph.station_to_idx[q[:-1]]
+        stations = matcher.city_to_stations.get(graph.station_to_city_code.get(idx, ""), [])
+        if stations:
+            return list(stations)
+
+    # 规则 3：带"县/镇/乡"后缀 → 县级地名单站（有站时；无站走规则 5）
+    if q.endswith(("县", "镇", "乡")) and q in graph.station_to_idx:
+        return [q]
+
+    # 规则 4：无后缀站名存在
+    if q in graph.station_to_idx:
+        idx = graph.station_to_idx[q]
+        city_code = graph.station_to_city_code.get(idx, "")
+        city_name = graph.city_code_to_name.get(city_code, "")
+        # 站名以所属城市名开头（北京南/信阳东/廊坊北）→ 明确站意图 → 单站
+        if city_name and q.startswith(city_name):
+            return [q]
+        # 班次充足（燕郊 43 班/新县 35 班）→ 独立车站 → 单站
+        n_dep = len(graph.departures.get(idx, ()))
+        if n_dep >= MIN_STATION_TRAINS_FOR_SINGLE:
+            return [q]
+        # 班次稀疏（怀柔 10 班/广阳 17 班）→ 区级可用性差 → 扩散所属市
+        stations = matcher.city_to_stations.get(city_code, [])
+        if stations:
+            return list(stations)
+        return [q]
+
+    # 规则 5：既有模糊（后缀/包含/拼音），无同名站的地名归并到所属城市
+    city_code = resolve_city_code(q, graph, matcher)
     stations = matcher.city_to_stations.get(city_code, [])
     if not stations:
         raise ValueError(f"未找到城市内有效铁路站: {query}")

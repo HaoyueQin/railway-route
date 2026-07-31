@@ -65,6 +65,13 @@ def build_search_request(mapping: Mapping) -> SearchRequest:
     if match_mode not in ("exact", "fuzzy"):
         raise RequestValidationError("INVALID_MATCH_MODE", "match_mode 必须是 exact 或 fuzzy")
 
+    # 每端独立匹配模式（from_mode/to_mode）：None = 跟随 match_mode
+    from_mode = _value(mapping, "from_mode", None) or None
+    to_mode = _value(mapping, "to_mode", None) or None
+    for name, val in (("from_mode", from_mode), ("to_mode", to_mode)):
+        if val is not None and val not in ("exact", "fuzzy"):
+            raise RequestValidationError("INVALID_MATCH_MODE", f"{name} 必须是 exact 或 fuzzy")
+
     profile = _value(mapping, "search_profile", "balanced")
     if profile not in SEARCH_PROFILES:
         raise RequestValidationError("INVALID_SEARCH_PROFILE", "search_profile 必须是 fast/balanced/thorough/complete")
@@ -109,6 +116,8 @@ def build_search_request(mapping: Mapping) -> SearchRequest:
         from_query=from_q,
         to_query=to_q,
         match_mode=match_mode,
+        from_mode=from_mode,
+        to_mode=to_mode,
         search_profile=profile,
         earliest_depart=dep_after,
         latest_depart=dep_before,
