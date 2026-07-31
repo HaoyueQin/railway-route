@@ -27,3 +27,5 @@ gui-test-screenshots/
 build/
 dist/
 *.spec
+# Rust 重构构建产物
+rust/target/
