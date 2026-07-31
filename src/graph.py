@@ -184,6 +184,10 @@ class RailwayGraph:
                     while arr_m + offset <= prev_time:
                         offset += 1440
                     prev_time = arr_m + offset
+                elif dep_m != -1:
+                    # 始发站无到达时刻：以发车时刻推进基准，
+                    # 否则下一站"01:00 到达"与 prev_time=-1 比较恒为 False，跨夜修正失效
+                    prev_time = dep_m + offset
                 st_idx = self._get_or_create_station(st["站名"])
                 full_stops.append((st_idx, dep_m + offset if dep_m != -1 else -1,
                                    arr_m + offset if arr_m != -1 else -1,

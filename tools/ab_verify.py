@@ -115,8 +115,10 @@ def full_scan_search(graph, request, matcher):
     complete = True
     stopped_reason = None
 
+    has_constraint = constraint_city is not None
     for r in range(rounds):
         cur = {}
+        code_arr = {}
         fp_done = set()
         prev_round = round_labels[r - 1] if r > 0 else None
         is_first = (r == 0)
@@ -157,13 +159,14 @@ def full_scan_search(graph, request, matcher):
                         rail_distance=rail, train_xfers=0, inter_xfers=0,
                         inter_minutes=0, prev=None, conn=raw, seg_kind="train",
                         matched_constraint=False)
-                    if _insert_round_label(cur, t, cand, state_limits) is not None:
+                    if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                         if same_city_arr[t]:
                             _expand_footpath(
                                 cur, cand, graph, t, arr_m, fp_done, rail, 0, dep_m,
                                 same_city_arr, foot_time, h_dist_arr, h_time_arr,
                                 detour_limit, prune_slack, best_durations, target_flag,
-                                constraint_city, city_of, state_limits)
+                                constraint_city, city_of, state_limits,
+                                code_arr, has_constraint, max_transfers)
 
             cl = cur.get(f)
             if cl:
@@ -186,13 +189,14 @@ def full_scan_search(graph, request, matcher):
                         inter_xfers=lb.inter_xfers, inter_minutes=lb.inter_minutes,
                         prev=lb, conn=raw, seg_kind="train",
                         matched_constraint=lb.matched_constraint)
-                    if _insert_round_label(cur, t, cand, state_limits) is not None:
+                    if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                         if same_city_arr[t]:
                             _expand_footpath(
                                 cur, cand, graph, t, arr_m, fp_done, rail, lb.train_xfers,
                                 lb.first_dep, same_city_arr, foot_time, h_dist_arr,
                                 h_time_arr, detour_limit, prune_slack, best_durations,
-                                target_flag, constraint_city, city_of, state_limits)
+                                target_flag, constraint_city, city_of, state_limits,
+                                code_arr, has_constraint, max_transfers)
 
             if prev_round is not None:
                 pl = prev_round.get(f)
@@ -200,7 +204,9 @@ def full_scan_search(graph, request, matcher):
                     for lb in pl:
                         if lb.arrive + same_buffer > dep_m:
                             break
-                        if lb.train_xfers + 1 > max_transfers:
+                        if lb.train_xfers + lb.inter_xfers + 1 > max_transfers:
+                            continue
+                        if lb.train_code == code:
                             continue
                         generated += 1
                         rail = lb.rail_distance + dist
@@ -221,13 +227,14 @@ def full_scan_search(graph, request, matcher):
                             inter_minutes=lb.inter_minutes,
                             prev=lb, conn=raw, seg_kind="train",
                             matched_constraint=matched)
-                        if _insert_round_label(cur, t, cand, state_limits) is not None:
+                        if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                             if same_city_arr[t]:
                                 _expand_footpath(
                                     cur, cand, graph, t, arr_m, fp_done, rail, lb.train_xfers + 1,
                                     lb.first_dep, same_city_arr, foot_time, h_dist_arr,
                                     h_time_arr, detour_limit, prune_slack, best_durations,
-                                    target_flag, constraint_city, city_of, state_limits)
+                                    target_flag, constraint_city, city_of, state_limits,
+                                code_arr, has_constraint, max_transfers)
 
         for st, lst in cur.items():
             if target_flag[st]:
@@ -239,9 +246,13 @@ def full_scan_search(graph, request, matcher):
         if not complete:
             break
 
+    # 直达与主搜索同步：独立直达枚举（完整）+ 换乘（r>=1），与桶化版一致
+    from src.csa import _collect_direct_routes
+    direct_routes = _collect_direct_routes(graph, request, source_set, target_set)
+
     results = []
     seen_keys = set()
-    for r in range(rounds):
+    for r in range(1, rounds):
         for lb in dest_labels[r]:
             if constraint_city and not lb.matched_constraint:
                 continue
@@ -262,10 +273,14 @@ def full_scan_search(graph, request, matcher):
                 seen_keys.add(key)
                 results.append(route)
 
-    results.sort(key=lambda r: (r.train_transfers + r.interstation_transfers, r.total_minutes))
+    all_routes = direct_routes + results
+    all_routes.sort(key=lambda r: (r.train_transfers + r.interstation_transfers, r.total_minutes))
     max_results = settings.max_results
-    if max_results is not None:
-        results = results[:max_results]
+    if max_results is not None and len(all_routes) > max_results:
+        direct_cnt = sum(1 for r in all_routes
+                         if r.train_transfers == 0 and r.interstation_transfers == 0)
+        all_routes = all_routes[:max(max_results, direct_cnt)]
+    results = all_routes
 
     from src.models import SearchMetadata, SearchResponse
     return SearchResponse(

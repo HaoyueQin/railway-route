@@ -17,17 +17,19 @@
   --shadow-mat:0 1px 3px rgba(30,41,59,.05),0 8px 28px rgba(30,41,59,.06);
   --ok:#059669; --warn:#d97706; --bad:#dc2626;
 
-  /* 字体体系：西文优先（SF Pro / Segoe UI Variable），中文跟随系统
-     （苹方 / 鸿蒙 / 小米 / 雅黑 / 思源），离线零下载 */
+  /* 字体体系：双族层次 —— 衬线标题（宋体系）+ 黑体正文 + 数字等宽。
+     中文系统字体环境下，"黑体/宋体"是仅有的现实族区分，标题衬线化是
+     中文排版高级感的标准手法（区别于全站同一黑体的单调） */
   --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,"PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei UI","Noto Sans CJK SC",sans-serif;
   --font-display:"SF Pro Display","Segoe UI Variable Display","Segoe UI",system-ui,"PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei UI",sans-serif;
+  --font-serif:"Songti SC","STSong","SimSun","Noto Serif CJK SC","Source Han Serif SC","Noto Serif SC",serif;
 
-  /* 字号阶梯（基准 16px） */
-  --fs-hero:2.35rem; --fs-h2:1.28rem; --fs-main:1rem;
-  --fs-sub:.88rem; --fs-meta:.78rem; --fs-tag:.7rem; --fs-micro:.64rem;
+  /* 字号阶梯（基准 17px，正文层明显可读） */
+  --fs-hero:2.5rem; --fs-h2:1.3rem; --fs-main:1rem;
+  --fs-sub:.9rem; --fs-meta:.8rem; --fs-tag:.72rem; --fs-micro:.66rem;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-size:16px;-webkit-text-size-adjust:100%}
+html{font-size:17px;-webkit-text-size-adjust:100%}
 body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01" 1,"cv01" 1}
 /* 时刻/里程等数字一律等宽对齐（tabular-nums）——排版细节决定高级感 */
 .num,.rc-time,.rc-node-time,.rc-arrow-time,.tt-tbl td,.tt-tbl th,.sf-bar input,.sr input[type=number],.inp[type=time]{font-variant-numeric:tabular-nums}
@@ -43,14 +45,14 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 /* ── Nav ── */
 .nv{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.72);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid var(--line)}
 .nv-in{max-width:1020px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 22px}
-.nv-logo{font-family:var(--font-display);font-weight:800;font-size:1rem;color:var(--ink);display:flex;align-items:center;gap:9px;letter-spacing:.2px}
+.nv-logo{font-family:var(--font-serif);font-weight:700;font-size:1.02rem;color:var(--ink);display:flex;align-items:center;gap:9px;letter-spacing:.2px}
 .nv-logo .ic{width:22px;height:22px;color:var(--accent)}
 .nv-sub{font-size:var(--fs-tag);color:var(--secondary);letter-spacing:.3px}
 
 /* ── Hero ── */
 .hero{padding:46px 18px 12px;text-align:center}
 .hero-inner{max-width:860px;margin:0 auto}
-.hero h1{font-family:var(--font-display);font-size:var(--fs-hero);font-weight:800;letter-spacing:-.02em;line-height:1.18;color:var(--ink);margin-bottom:14px;animation:heroIn .6s cubic-bezier(.2,.7,.3,1) both}
+.hero h1{font-family:var(--font-serif);font-size:var(--fs-hero);font-weight:700;letter-spacing:.01em;line-height:1.25;color:var(--ink);margin-bottom:14px;animation:heroIn .6s cubic-bezier(.2,.7,.3,1) both}
 .hero p{font-size:var(--fs-sub);color:var(--ink-2);max-width:600px;margin:0 auto;animation:heroIn .6s .08s cubic-bezier(.2,.7,.3,1) both}
 @keyframes heroIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
 
@@ -65,7 +67,7 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 .station-box{flex:1;min-width:0}
 .s-label{display:block;font-size:.68rem;font-weight:700;color:var(--secondary);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px}
 .s-input-wrap{display:flex;gap:10px;align-items:center}
-.inp{flex:1;width:100%;padding:12px 15px;font-size:1rem;font-family:inherit;color:var(--ink);background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:var(--r-md);outline:none;transition:border-color .22s,box-shadow .22s}
+.inp{flex:1;width:100%;padding:12px 15px;font-size:1.05rem;font-family:inherit;color:var(--ink);background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:var(--r-md);outline:none;transition:border-color .22s,box-shadow .22s}
 .inp:hover{border-color:rgba(79,70,229,.35)}
 .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3.5px rgba(79,70,229,.13)}
 .inp::placeholder{color:#c3cad6;font-size:.88rem}
@@ -181,7 +183,7 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 .sf-clear:hover{border-color:var(--accent);color:var(--accent)}
 
 /* Section header */
-.sec-hd{font-size:.8rem;font-weight:800;color:var(--ink);margin:18px 4px 9px;padding-bottom:7px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
+.sec-hd{font-family:var(--font-serif);font-size:.92rem;font-weight:700;color:var(--ink);margin:18px 4px 9px;padding-bottom:7px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
 .sec-hd .cnt{font-size:.68rem;font-weight:600;color:var(--secondary);background:rgba(148,163,184,.1);padding:1px 9px;border-radius:10px}
 
 /* ── 路线卡片 ── */
@@ -192,7 +194,7 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 .rc-num{flex:none;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800;color:#fff;margin-top:1px;box-shadow:0 2px 8px rgba(0,0,0,.12)}
 .rc-body{flex:1;min-width:0}
 .rc-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:3px}
-.rc-route{font-size:1rem;font-weight:800;color:var(--ink);letter-spacing:.2px}
+.rc-route{font-size:1.06rem;font-weight:800;color:var(--ink);letter-spacing:.2px}
 .rc-time{font-size:.78rem;font-weight:700;color:var(--accent)}
 .rc-num.n-good{background:linear-gradient(135deg,#059669,#34d399)}
 .rc-num.n-mid{background:linear-gradient(135deg,#d97706,#fbbf24)}

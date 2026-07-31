@@ -283,29 +283,32 @@ class RoundLabelInsertTest(unittest.TestCase):
     def test_no_cross_train_dominance(self):
         # 轮内不同车次共存：T2 更早更短也不支配 T1（跨车次不支配）
         cur: dict = {}
-        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(540, "T1", 480, 100), 8))
-        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(525, "T2", 510, 50), 8))
+        ca: dict = {}
+        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(540, "T1", 480, 100), 8, ca, False))
+        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(525, "T2", 510, 50), 8, ca, False))
         self.assertEqual(len(cur[1]), 2, "不同车次标签应共存")
 
     def test_same_train_earlier_wins(self):
         cur: dict = {}
-        _insert_round_label(cur, 1, self._mk_label(540, "T1", 480), 8)
+        ca: dict = {}
+        _insert_round_label(cur, 1, self._mk_label(540, "T1", 480), 8, ca, False)
         # 同车次更晚到达被拒绝
-        self.assertIsNone(_insert_round_label(cur, 1, self._mk_label(600, "T1", 480), 8))
+        self.assertIsNone(_insert_round_label(cur, 1, self._mk_label(600, "T1", 480), 8, ca, False))
         self.assertEqual(len(cur[1]), 1)
 
     def test_same_train_cross_day_coexists(self):
         cur: dict = {}
-        _insert_round_label(cur, 1, self._mk_label(540, "T1", 480), 8)
+        ca: dict = {}
+        _insert_round_label(cur, 1, self._mk_label(540, "T1", 480), 8, ca, False)
         # 同车次跨日（差 1440 分钟）允许共存（次日班次独立成线）
-        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(1980, "T1", 1920), 8))
+        self.assertIsNotNone(_insert_round_label(cur, 1, self._mk_label(1980, "T1", 1920), 8, ca, False))
         self.assertEqual(len(cur[1]), 2)
 
     def test_capacity_truncation_keeps_diversity(self):
         cur: dict = {}
         for i in range(10):
             self.assertIsNotNone(
-                _insert_round_label(cur, 1, self._mk_label(500 + i, f"T{i}", 400 + i, 100), 4))
+                _insert_round_label(cur, 1, self._mk_label(500 + i, f"T{i}", 400 + i, 100), 4, {}, False))
         self.assertLessEqual(len(cur[1]), 4, "超过上限应截断")
         codes = {lb.train_code for lb in cur[1]}
         self.assertEqual(len(codes), len(cur[1]), "截断应保留不同车次多样性")

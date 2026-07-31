@@ -102,31 +102,61 @@ def _insert_round_label(
     station: int,
     cand: Label,
     state_limits: Optional[int],
+    code_arr: dict,
+    has_constraint: bool,
 ) -> bool:
-    """轮内标签插入。
+    """轮内标签插入（主循环与 footpath 共用）。
 
     关键设计：轮内**不做跨车次支配**——同一车站的不同车次到达时间不同，
     但后续可达性也不同（车次终点/走向不同），跨车次支配会误杀"稍晚到达
     但能到达目标"的车次（如京沪 G1 被终点为青岛的早班车支配而断链）。
-    - 同车次（同一天窗口内）只保留最早到达标签；
-    - 跨车次共存，按到达时间排序，截断时优先保留不同车次（多样性）。
+    - 同车次（同一天窗口内）只保留最早到达标签：code_arr 索引 O(1) 判定
+      （每轮每站 {车次: 最早到达}），替代线性扫描——标签列表大时线性扫
+      是主热点（cProfile：_insert_round_label 占 complete 查询 ~54%）；
+    - 跨车次共存，按到达时间排序，截断时优先保留不同车次（多样性）；
+    - 无换乘城市约束的查询跳过 matched 扫描（短路，绝大多数查询无约束）。
     """
     lst = cur.get(station)
+    seen_map = code_arr.get(station)
     if lst is None:
         cur[station] = [cand]
+        if seen_map is None:
+            code_arr[station] = {cand.train_code: cand.arrive}
+        else:
+            seen_map[cand.train_code] = cand.arrive
         return cand
-    # 同车次支配（同一天窗口内）：车次每站最多一个到达
-    for i, lb in enumerate(lst):
-        if lb.train_code == cand.train_code and abs(lb.arrive - cand.arrive) < 1440:
-            if lb.arrive <= cand.arrive:
-                return None
-            del lst[i]
-            break
-    # 二分插入（保持 arrive 升序，避免每次全排序）
+    if seen_map is None:
+        seen_map = code_arr[station] = {}
+    prev_arr = seen_map.get(cand.train_code)
+    if prev_arr is not None and abs(prev_arr - cand.arrive) < 1440:
+        # 同班次重复：保留更早到达
+        if prev_arr <= cand.arrive:
+            return None
+        # 旧标签被更新：arrive 已知，二分定位同 arrive 段再找同 code 删除
+        lo, hi = 0, len(lst)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if lst[mid].arrive < prev_arr:
+                lo = mid + 1
+            else:
+                hi = mid
+        i = lo
+        while i < len(lst) and lst[i].arrive == prev_arr:
+            if lst[i].train_code == cand.train_code:
+                del lst[i]
+                break
+            i += 1
+        seen_map[cand.train_code] = cand.arrive
+    elif prev_arr is None:
+        seen_map[cand.train_code] = cand.arrive
+    # 二分插入：保持 arrive 升序；同 arrive 段内按车次号稳定排序——
+    # 消除扫描顺序敏感性（堆序 vs 全量序），否则同刻标签的先后依赖
+    # 处理顺序，截断时保留集随之分歧（A/B 验证曾出现 full≠bkt）
     lo, hi = 0, len(lst)
     while lo < hi:
         mid = (lo + hi) // 2
-        if lst[mid].arrive < cand.arrive:
+        if (lst[mid].arrive < cand.arrive or
+                (lst[mid].arrive == cand.arrive and lst[mid].train_code < cand.train_code)):
             lo = mid + 1
         else:
             hi = mid
@@ -143,8 +173,7 @@ def _insert_round_label(
         if len(dedup) > state_limits:
             # 约束匹配标签优先保留：指定换乘城市的路线往往较慢
             # （如经郑州 vs 京沪快线），不能被快速路线挤掉截断。
-            # 快路径（常见无约束查询）：短路检查无匹配标签时直接截断
-            if not any(lb.matched_constraint for lb in dedup):
+            if not has_constraint or not any(lb.matched_constraint for lb in dedup):
                 del dedup[state_limits:]
             else:
                 matched_lb = [lb for lb in dedup if lb.matched_constraint]
@@ -154,6 +183,9 @@ def _insert_round_label(
                     dedup = matched_lb + [lb for lb in dedup if not lb.matched_constraint]
                     del dedup[state_limits:]
         lst[:] = dedup
+        # 截断删除了标签：重建 code_arr 索引保持同步，否则被删车次的
+        # 后续同班次标签会被"索引仍在"误拒（且 full/bkt 截断时机不同会造成分歧）
+        code_arr[station] = {lb.train_code: lb.arrive for lb in lst}
     return cand
 
 
@@ -305,6 +337,80 @@ def _collapse_train_segments(graph: RailwayGraph, conns: list) -> list[TrainSegm
         distance=current[_CONN_DIST],
     ))
     return result
+
+
+# ── 独立直达枚举（直达永远完整）──────────────────────
+
+def _collect_direct_routes(
+    graph: RailwayGraph,
+    request: SearchRequest,
+    source_set: set[int],
+    target_set: set[int],
+) -> list[RouteResult]:
+    """直达方案独立枚举：不受 CSA 标签截断 / 绕路 / 耗时剪枝影响。
+
+    图只建相邻停站边，直达 = 同一车次连续乘坐（同车续乘链）。对源站的
+    每条上车连接，沿 train_stops 全程停站表向后扫描：命中目标站即构成
+    直达。时刻换算：train_stops 为发车日坐标系（跨夜链式 +1440），
+    conn 为段内坐标系，day = (conn_dep - stops_dep) // 1440（可为负，
+    表示"今天的班次 = 发车日的 +1/-1 天"），到达绝对时刻 = arr + day*1440。
+    """
+    out_conns = graph.out_conns
+    train_stops = graph.train_stops
+    idx_to_station = graph.idx_to_station
+    routes: list[RouteResult] = []
+    seen: set = set()   # (code, s, t)：双日连接只保留最早班次
+    e_dep, l_dep = request.earliest_depart, request.latest_depart
+    e_arr, l_arr = request.earliest_arrive, request.latest_arrive
+
+    for s in source_set:
+        for conn in out_conns[s]:
+            dep_m = conn[_CONN_DEP]
+            if not (e_dep <= dep_m <= l_dep):
+                continue
+            code = conn[_CONN_CODE]
+            stops = train_stops.get(code)
+            if not stops:
+                continue
+            seq_f = conn[_CONN_SEQ]
+            pos = next((k for k, st in enumerate(stops)
+                        if st[0] == s and st[3] == seq_f), None)
+            if pos is None or stops[pos][1] == -1:
+                continue
+            day = (dep_m - stops[pos][1]) // 1440
+            base_cum = stops[pos][4]
+            for st in stops[pos + 1:]:
+                st_idx, _, arr2, _, cum = st
+                if arr2 == -1 or st_idx not in target_set:
+                    continue
+                if (code, s, st_idx) in seen:
+                    continue
+                arr_abs = arr2 + day * 1440
+                if not (e_arr <= arr_abs <= l_arr):
+                    continue
+                seen.add((code, s, st_idx))
+                seg = TrainSegment(
+                    train_code=code,
+                    from_station=idx_to_station[s],
+                    to_station=idx_to_station[st_idx],
+                    depart_minutes=dep_m,
+                    arrive_minutes=arr_abs,
+                    travel_minutes=arr_abs - dep_m,
+                    distance=max(0, cum - base_cum),
+                )
+                routes.append(RouteResult(
+                    segments=(seg,),
+                    actual_origin=idx_to_station[s],
+                    actual_destination=idx_to_station[st_idx],
+                    first_departure=dep_m,
+                    final_arrival=arr_abs,
+                    total_minutes=arr_abs - dep_m,
+                    rail_distance=max(0, cum - base_cum),
+                    train_transfers=0,
+                    interstation_transfers=0,
+                    transfer_cities=(),
+                ))
+    return routes
 
 
 # ── 预扫描：每换乘级别最短总耗时 ─────────────────────────
@@ -529,6 +635,9 @@ def _expand_footpath(
     constraint_city: Optional[str],
     city_of: dict,
     state_limits: Optional[int],
+    code_arr: dict,
+    has_constraint: bool,
+    max_transfers: int,
 ) -> list:
     """同城 footpath 松弛：列车到达站 t 后向同城 other 生成地面移动标签。
 
@@ -539,6 +648,8 @@ def _expand_footpath(
     """
     if cand.seg_kind != "train":
         return []
+    if xfers + cand.inter_xfers + 1 > max_transfers:
+        return []   # 地面换乘计入总换乘上限（乘客视角：出站换乘也是换乘）
     partners = same_city_arr[t]
     if not partners:
         return []
@@ -575,7 +686,7 @@ def _expand_footpath(
             prev=cand, conn=None, seg_kind="interstation",
             matched_constraint=cand.matched_constraint or (
                 constraint_city is not None and city_of.get(t, "") == constraint_city))
-        if _insert_round_label(cur, other, fp, state_limits) is not None:
+        if _insert_round_label(cur, other, fp, state_limits, code_arr, has_constraint) is not None:
             inserted.append((other, fp_arr))
     return inserted
 
@@ -662,8 +773,10 @@ def search(
     complete = True
     stopped_reason: Optional[str] = None
 
+    has_constraint = constraint_city is not None
     for r in range(rounds):
         cur: dict[int, list[Label]] = {}
+        code_arr: dict = {}   # 轮内每站 {车次: 最早到达}，O(1) 同车次去重
         fp_done: set = set()
         prev_round = round_labels[r - 1] if r > 0 else None
         is_first = (r == 0)
@@ -736,7 +849,7 @@ def search(
                             rail_distance=rail, train_xfers=0, inter_xfers=0,
                             inter_minutes=0, prev=None, conn=raw, seg_kind="train",
                             matched_constraint=False)
-                        if _insert_round_label(cur, t, cand, state_limits) is not None:
+                        if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                             lst_t = cur.get(t)
                             _sync_heap(heap, pos_of, earliest_of, out_conns, t, lst_t[0].arrive)
                             if same_city_arr[t]:
@@ -745,7 +858,7 @@ def search(
                                     cur, cand, graph, t, arr_m, fp_done, rail, 0, dep_m,
                                     same_city_arr, foot_time, h_dist_arr, h_time_arr,
                                     detour_limit, prune_slack, best_durations, target_flag,
-                                    constraint_city, city_of, state_limits))
+                                    constraint_city, city_of, state_limits, code_arr, has_constraint, max_transfers))
 
                 # ── 来源 2：同车续乘（本轮即时标签）──
                 if cl:
@@ -769,7 +882,7 @@ def search(
                             inter_xfers=lb.inter_xfers, inter_minutes=lb.inter_minutes,
                             prev=lb, conn=raw, seg_kind="train",
                             matched_constraint=lb.matched_constraint)
-                        if _insert_round_label(cur, t, cand, state_limits) is not None:
+                        if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                             lst_t = cur.get(t)
                             _sync_heap(heap, pos_of, earliest_of, out_conns, t, lst_t[0].arrive)
                             if same_city_arr[t]:
@@ -778,14 +891,19 @@ def search(
                                     cur, cand, graph, t, arr_m, fp_done, rail, lb.train_xfers,
                                     lb.first_dep, same_city_arr, foot_time, h_dist_arr,
                                     h_time_arr, detour_limit, prune_slack, best_durations,
-                                    target_flag, constraint_city, city_of, state_limits))
+                                    target_flag, constraint_city, city_of, state_limits, code_arr, has_constraint, max_transfers))
 
                 # ── 来源 3：换乘（上一轮标签）──
                 if pl:
                     for lb in pl:
                             if lb.arrive + same_buffer > dep_m:
                                 break  # 列表按到达升序，之后的标签更晚，必不满足缓冲
-                            if lb.train_xfers + 1 > max_transfers:
+                            if lb.train_xfers + lb.inter_xfers + 1 > max_transfers:
+                                continue
+                            # 同车次跨轮"换乘"一律无效（含停站时刻倒挂等数据异常
+                            # 导致的 arrive != dep 情形）：同趟应续乘，隔天同车次
+                            # 乘客也不会换乘——跳过，避免"单段+1次换乘"假路线
+                            if lb.train_code == code:
                                 continue
                             generated += 1
                             rail = lb.rail_distance + dist
@@ -806,7 +924,7 @@ def search(
                                 inter_minutes=lb.inter_minutes,
                                 prev=lb, conn=raw, seg_kind="train",
                                 matched_constraint=matched)
-                            if _insert_round_label(cur, t, cand, state_limits) is not None:
+                            if _insert_round_label(cur, t, cand, state_limits, code_arr, has_constraint) is not None:
                                 lst_t = cur.get(t)
                                 _sync_heap(heap, pos_of, earliest_of, out_conns, t, lst_t[0].arrive)
                                 if same_city_arr[t]:
@@ -815,7 +933,7 @@ def search(
                                         cur, cand, graph, t, arr_m, fp_done, rail, lb.train_xfers + 1,
                                         lb.first_dep, same_city_arr, foot_time, h_dist_arr,
                                         h_time_arr, detour_limit, prune_slack, best_durations,
-                                        target_flag, constraint_city, city_of, state_limits))
+                                        target_flag, constraint_city, city_of, state_limits, code_arr, has_constraint, max_transfers))
 
                 # 批处理推进：本站下一连接 dep 不超过堆中最小值时，段内继续
                 # （堆保证全局时间序；段内处理产生的回退/新站入堆会改变堆顶，
@@ -844,10 +962,16 @@ def search(
             break
 
     # ── 回溯、过滤、去重 ──
+    # 直达方案由独立枚举提供（永远完整、不受剪枝截断影响）；
+    # CSA 第 0 轮仅作为换乘轮的标签基础，其直达标签不再作为结果输出。
+    direct_routes = _collect_direct_routes(graph, request, source_set, target_set)
+    if constraint_city is not None:
+        # 指定换乘城市约束：直达（无换乘）不符合"必须经该城市换乘"，全部排除
+        direct_routes = []
     results: list[RouteResult] = []
     seen_keys: set = set()
 
-    for r in range(rounds):
+    for r in range(1, rounds):
         for lb in dest_labels[r]:
             if constraint_city and not lb.matched_constraint:
                 continue
@@ -871,16 +995,21 @@ def search(
                 seen_keys.add(key)
                 results.append(route)
 
-    results.sort(key=lambda r: (r.train_transfers + r.interstation_transfers, r.total_minutes))
+    # 合并直达 + 换乘，按（换乘次数, 总耗时）排序 → 直达天然在最前
+    all_routes = direct_routes + results
+    all_routes.sort(key=lambda r: (r.train_transfers + r.interstation_transfers, r.total_minutes))
 
     max_results = settings.max_results
-    if max_results is not None:
-        results = results[:max_results]
+    if max_results is not None and len(all_routes) > max_results:
+        # 直达永远完整：截断只作用于换乘部分（直达数量恒为上限下限）
+        direct_cnt = sum(1 for r in all_routes
+                         if r.train_transfers == 0 and r.interstation_transfers == 0)
+        all_routes = all_routes[:max(max_results, direct_cnt)]
 
     elapsed_ms = int((_time.perf_counter() - t_start) * 1000)
 
     return SearchResponse(
-        routes=tuple(results),
+        routes=tuple(all_routes),
         metadata=SearchMetadata(
             profile=request.search_profile,
             complete=complete,
@@ -888,7 +1017,7 @@ def search(
             elapsed_ms=elapsed_ms,
             scanned_connections=scanned,
             generated_states=generated,
-            returned_routes=len(results),
+            returned_routes=len(all_routes),
         ),
         source_stations=tuple(source_names),
         target_stations=tuple(target_names),

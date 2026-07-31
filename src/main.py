@@ -230,7 +230,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.cache.put(cache_key, json.dumps(payload, ensure_ascii=False))
             self._json(payload)
         except ValueError as e:
-            self._json({"error": {"code": "INTERNAL_ERROR", "message": str(e)}}, status=500)
+            # 车站解析失败是用户输入问题（非内部错误）：400 友好提示，前端直接展示
+            msg = str(e)
+            if msg.startswith("未找到匹配的车站"):
+                self._json({"error": {"code": "STATION_NOT_FOUND", "message": msg}}, status=400)
+            else:
+                self._json({"error": {"code": "INTERNAL_ERROR", "message": msg}}, status=500)
 
     def _json(self, d, *, status=200):
         self.send_response(status)
