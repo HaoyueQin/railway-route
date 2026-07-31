@@ -117,6 +117,32 @@ def _base_dir() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parent.parent
 
 
+def _log_error(msg: str):
+    """windowed 打包后控制台不可见：异常写入本地日志便于排查。"""
+    try:
+        log_dir = pathlib.Path(os.environ.get("LOCALAPPDATA", pathlib.Path.home())) / "铁路出行路径规划"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_dir / "app.log", "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _install_excepthook():
+    """打包（windowed）后未捕获异常会静默退出：落盘日志 + 提示用户。"""
+    if not getattr(sys, "frozen", False):
+        return
+
+    def hook(tp, val, tb):
+        import traceback
+        msg = "".join(traceback.format_exception(tp, val, tb))
+        _log_error(msg)
+        print(msg, file=sys.stderr)
+        print(f"启动失败，日志已写入 %LOCALAPPDATA%\\铁路出行路径规划\\app.log", file=sys.stderr)
+
+    sys.excepthook = hook
+
+
 WEB_DIR = _base_dir() / "web"
 DATA_DIR = _base_dir() / "data"
 STATIC_TYPES = {
@@ -255,16 +281,28 @@ class APIHandler(BaseHTTPRequestHandler):
 
 
 def _start_server(graph, matcher, port):
-    """启动本地 HTTP 服务（供 GUI / WebView 共用）。"""
+    """启动本地 HTTP 服务（供 GUI / WebView 共用）。
+
+    端口策略：优先指定端口 → 被占用/落入 Windows 排除范围（Hyper-V/WSL 保留段，
+    本机曾见 7954~8053 整段排除）时递增尝试 → 兜底用端口 0 由系统随机分配，
+    保证桌面应用在任何机器上都能启动。
+    """
     APIHandler.graph = graph; APIHandler.matcher = matcher
     APIHandler.cache = SearchCache()
-    APIHandler.data_fp = data_fingerprint("data/output/车次时刻表.csv")
-    return HTTPServer(("127.0.0.1", port), APIHandler)
+    APIHandler.data_fp = data_fingerprint(str(DATA_DIR / "output" / "车次时刻表.csv"))
+    for p in range(port, port + 20):
+        try:
+            s = HTTPServer(("127.0.0.1", p), APIHandler)
+            return s, p
+        except OSError:
+            continue
+    s = HTTPServer(("127.0.0.1", 0), APIHandler)  # 系统随机分配，永不冲突
+    return s, s.server_address[1]
 
 
 def run_gui(graph, matcher, port=8000):
-    s = _start_server(graph, matcher, port)
-    url = f"http://127.0.0.1:{port}"
+    s, actual = _start_server(graph, matcher, port)
+    url = f"http://127.0.0.1:{actual}"
     print(f"\n  GUI: {url}\n")
     webbrowser.open(url)
     try: s.serve_forever()
@@ -277,6 +315,7 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
     - frameless 无系统边框：前端自绘标题栏（拖动/最小化/关闭），
       配合 -webkit-app-region 拖拽区，完全自有窗口观感
     - 无 pywebview 时自动回退浏览器模式
+    - webview 启动失败（如缺 WebView2 运行时）也回退浏览器模式，不崩溃
     """
     try:
         import webview  # 第三方可选依赖（pip install pywebview）
@@ -284,12 +323,11 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
         print("未安装 pywebview（pip install pywebview 可启用桌面窗口），回退浏览器模式")
         run_gui(graph, matcher, port)
         return
-    s = _start_server(graph, matcher, port)
+    s, actual = _start_server(graph, matcher, port)
     # 服务在独立线程运行：webview.start() 是主事件循环，不能阻塞在 serve_forever
     import threading
     threading.Thread(target=s.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{port}"
-    icon = pathlib.Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+    url = f"http://127.0.0.1:{actual}"
     print(f"\n  桌面应用: {url}（关闭窗口即退出）\n")
 
     class WindowApi:
@@ -315,11 +353,18 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
             js_api=WindowApi(),
         )
         webview.start()
+    except Exception as e:
+        _log_error(f"webview 启动失败，回退浏览器模式: {e}")
+        print(f"webview 启动失败（{e}），回退浏览器模式")
+        webbrowser.open(url)
+        try: s.serve_forever()
+        except KeyboardInterrupt: pass
     finally:
         s.shutdown()
 
 
 def main():
+    _install_excepthook()
     p = argparse.ArgumentParser()
     p.add_argument("from_station", nargs="?", default="曲阜东")
     p.add_argument("to_station", nargs="?", default="广州南")
@@ -344,7 +389,7 @@ def main():
     graph = RailwayGraph()
     graph.build(csv_path=str(DATA_DIR / "output" / "车次时刻表.csv"),
                 station_js_path=str(DATA_DIR / "timetable" / "station_name.js"))
-    matcher = build_matcher(graph, "data/timetable/station_name.js")
+    matcher = build_matcher(graph, str(DATA_DIR / "timetable" / "station_name.js"))
     print(f"({time.time()-t0:.1f}s)")
 
     if a.app or getattr(sys, "frozen", False):

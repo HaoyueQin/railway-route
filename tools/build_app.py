@@ -20,6 +20,7 @@ def main():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean", "--onefile",
+        "--noconsole",  # windowed：双击不弹命令行窗口（错误写 %LOCALAPPDATA%\铁路出行路径规划\app.log）
         "--name", "铁路出行路径规划",
         "--icon", str(ICON),
         # 前端与数据随包分发（frozen 时 _base_dir() 指向解压目录）
