@@ -231,12 +231,13 @@ MIN_STATION_TRAINS_FOR_SINGLE = 25
 def resolve_station_set(query: str, mode: str, graph, matcher: MatcherData) -> list[str]:
     """按 exact/fuzzy 模式解析单站或同城全部有效站。
 
-    fuzzy 的贴近生活规则（2026-07 修正，兼顾区/县/镇的行政级别语义）：
+    fuzzy 的贴近生活规则（2026-08 修正，兼顾区/县/镇的行政级别语义）：
     1. 输入是**城市名**（信阳/北京/廊坊）→ 该市全部站；
     2. 带"区"后缀（怀柔区/广阳区）→ 区级地名 → 归并到所属市全部站；
     3. 带"县/镇/乡"后缀 → 县级地名 → 单站（有站时）；
     4. 无后缀但图中存在该站名：
-       - 站名以所属城市名开头（北京南/信阳东）→ 明确站意图 → 单站；
+       - 站名以所属城市名开头（北京南/信阳东）→ 城市前缀扩散 → 所属市全部站；
+       - 站名去方位后缀后的地名与组内其他站同名（曲阜东→曲阜）→ 同城扩散；
        - 出发车次 >= 25（燕郊/新县）→ 班次充足 → 单站；
        - 班次稀疏（怀柔/广阳）→ 区级可用性 → 扩散到所属市；
     5. 否则既有模糊匹配（通州→北京通州→北京市全部站）。
@@ -271,9 +272,19 @@ def resolve_station_set(query: str, mode: str, graph, matcher: MatcherData) -> l
         idx = graph.station_to_idx[q]
         city_code = graph.station_to_city_code.get(idx, "")
         city_name = graph.city_code_to_name.get(city_code, "")
-        # 站名以所属城市名开头（北京南/信阳东/廊坊北）→ 明确站意图 → 单站
+        # 站名以所属城市名开头（北京南/信阳东/廊坊北）→ 城市前缀扩散
+        # → 所属市全部站（"北京西"→北京全部站；区/县/镇由规则 2/3 先行拦截）
         if city_name and q.startswith(city_name):
+            stations = matcher.city_to_stations.get(city_code, [])
+            if stations:
+                return list(stations)
             return [q]
+        # 地名同名站规则：站名去方位后缀后的地名与组内其他站同名
+        # （曲阜东→曲阜、霸州西→霸州）→ 同城扩散（与 fuzzy_match 兜底规则一致）
+        stations = matcher.city_to_stations.get(city_code, [])
+        base = q[:-1] if q[-1:] in ("东", "西", "南", "北") else q
+        if any(s != q and s == base for s in stations):
+            return list(stations)
         # 班次充足（燕郊 43 班/新县 35 班）→ 独立车站 → 单站
         n_dep = len(graph.departures.get(idx, ()))
         if n_dep >= MIN_STATION_TRAINS_FOR_SINGLE:
