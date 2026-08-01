@@ -162,18 +162,70 @@ pub fn fuzzy_match(graph: &Graph, matcher: &MatcherData, query: &str) -> Vec<(i3
     }
     for station in &matcher.all_stations {
         let station_clean = &matcher.station_clean[station];
-        if station_clean.len() >= 2 && q_clean.ends_with(station_clean) {
-            add!(140 + station_clean.len() as i32 * 2, station.clone());
-        } else if q_clean.len() >= 2 && station_clean.ends_with(&q_clean) {
-            add!(135 + q_clean.len() as i32 * 2, station.clone());
+        // 注意：Python len() 是字符数，Rust String::len() 是字节数（中文 1 字 = 3 字节）
+        let sc_chars = station_clean.chars().count();
+        let qc_chars = q_clean.chars().count();
+        if sc_chars >= 2 && q_clean.ends_with(station_clean) {
+            add!(140 + sc_chars as i32 * 2, station.clone());
+        } else if qc_chars >= 2 && station_clean.ends_with(&q_clean) {
+            add!(135 + qc_chars as i32 * 2, station.clone());
         }
     }
     for station in &matcher.all_stations {
         let station_clean = &matcher.station_clean[station];
-        if q_clean.len() >= 2 && station_clean.contains(&q_clean) {
-            add!(120 + q_clean.len() as i32, station.clone());
-        } else if station_clean.len() >= 2 && q_clean.contains(station_clean) {
-            add!(110 + station_clean.len() as i32, station.clone());
+        let sc_chars = station_clean.chars().count();
+        let qc_chars = q_clean.chars().count();
+        if qc_chars >= 2 && station_clean.contains(&q_clean) {
+            add!(120 + qc_chars as i32, station.clone());
+        } else if sc_chars >= 2 && q_clean.contains(station_clean) {
+            add!(110 + sc_chars as i32, station.clone());
+        }
+    }
+
+    // 城市前缀扩散：q 以某城市名开头（北京西/上海虹桥/广州南）→ 该城市全部站。
+    // 贴近生活：输入"北京西"应能看到北京市所有站（同城换乘提示），而非仅有精确站与城市名。
+    for (city_name, code) in &matcher.city_name_to_code {
+        if city_name.chars().count() >= 2 && q_clean.starts_with(city_name.as_str()) {
+            if let Some(stations) = matcher.city_to_stations.get(code) {
+                for name in stations {
+                    add!(160, name.clone());
+                }
+            }
+            break;
+        }
+    }
+
+    // 同城兜底扩散：已匹配到的车站满足以下任一条件 → 归并其所属城市全部站：
+    //   a) 班次稀疏（<25 班）的区级/县级地名（怀柔/广阳）→ 归市；
+    //   b) 站名去方位后缀（东/西/南/北）后的地名与同城组内其他站同名
+    //      （霸州西→"霸州"→组内有霸州/霸州北）→ 视为同城地名；
+    // 班次充足的独立站（燕郊 43 班/新县 35 班）与县级单站保持独立不扩散。
+    if !results.is_empty() {
+        let mut city_codes: Vec<String> = Vec::new();
+        for (_, name) in results.iter().take(8) {
+            let Some(&idx) = graph.station_to_idx.get(name) else { continue };
+            let Some(cc) = matcher.station_to_city_code.get(name) else { continue };
+            let n_dep = graph.departures[idx].len();
+            if n_dep >= MIN_STATION_TRAINS_FOR_SINGLE {
+                // 班次充足：仅当"地名同名站"存在才扩散（霸州西→霸州）
+                let base = name
+                    .strip_suffix(['东', '西', '南', '北'])
+                    .unwrap_or(name.as_str());
+                let same_group = matcher.city_to_stations.get(cc).cloned().unwrap_or_default();
+                if !same_group.iter().any(|s| s == base && s != name) {
+                    continue;
+                }
+            }
+            if !city_codes.contains(cc) {
+                city_codes.push(cc.clone());
+            }
+        }
+        for cc in &city_codes {
+            if let Some(stations) = matcher.city_to_stations.get(cc) {
+                for name in stations {
+                    add!(105, name.clone());
+                }
+            }
         }
     }
     // sort 稳定（Rust sort_by 为稳定排序，与 Python 一致）
