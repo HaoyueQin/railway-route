@@ -350,9 +350,10 @@ function initTimePick(id, opts) {
     el.setAttribute("aria-expanded", String(open));
   };
   createWheel(row, "h", h, v => { h = v; empty = false; paint(); });
+  // 冒号插在两个滚轮之间（append 顺序决定布局）
   const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
-  createWheel(row, "m", m, v => { m = v; empty = false; paint(); });
   row.appendChild(colon);
+  createWheel(row, "m", m, v => { m = v; empty = false; paint(); });
   if (clearBtn) {
     clearBtn.addEventListener("click", e => {
       e.stopPropagation();
