@@ -18,10 +18,14 @@ pub struct StopRow {
     pub distance_km: u32,
 }
 
-/// 解析时刻表 CSV → 按车次分组（组内按序号排序）。
-pub fn parse_timetable_csv(path: &Path) -> Result<HashMap<String, Vec<StopRow>>, String> {
+/// 解析时刻表 CSV → 按车次分组（组内按序号排序，车次按 CSV 首次出现顺序）。
+///
+/// 保序版本：与 Python dict 的插入序一致，用于对齐 "该边首个车次的里程"
+/// （同一区段可能混有 0 里程的 Y 字头车次，Python 取首条记录的值）。
+pub fn parse_timetable_csv_ordered(path: &Path) -> Result<Vec<(String, Vec<StopRow>)>, String> {
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text); // UTF-8 BOM
+    let mut order: Vec<String> = Vec::new();
     let mut grouped: HashMap<String, Vec<StopRow>> = HashMap::new();
     for (i, line) in text.lines().enumerate() {
         if i == 0 {
@@ -40,6 +44,9 @@ pub fn parse_timetable_csv(path: &Path) -> Result<HashMap<String, Vec<StopRow>>,
         let arrive = cols[3].trim().to_string();
         let depart = cols[4].trim().to_string();
         let dist: u32 = cols[6].trim().parse().unwrap_or(0);
+        if !grouped.contains_key(&code) {
+            order.push(code.clone());
+        }
         grouped.entry(code).or_default().push(StopRow {
             seq,
             station,
@@ -48,10 +55,20 @@ pub fn parse_timetable_csv(path: &Path) -> Result<HashMap<String, Vec<StopRow>>,
             distance_km: dist,
         });
     }
-    for v in grouped.values_mut() {
+    let mut out: Vec<(String, Vec<StopRow>)> = Vec::with_capacity(order.len());
+    for code in order {
+        let mut v = grouped.remove(&code).unwrap_or_default();
         v.sort_by_key(|r| r.seq);
+        out.push((code, v));
     }
-    Ok(grouped)
+    Ok(out)
+}
+
+/// 解析时刻表 CSV → 按车次分组（组内按序号排序）。
+pub fn parse_timetable_csv(path: &Path) -> Result<HashMap<String, Vec<StopRow>>, String> {
+    Ok(parse_timetable_csv_ordered(path)?
+        .into_iter()
+        .collect::<HashMap<_, _>>())
 }
 
 /// "HH:MM" → 当日分钟数；空串 → None。
@@ -110,8 +127,21 @@ pub fn build_train_stops(
     out
 }
 
-/// 解析 station_name.js → 城市分组 {city_code: [站名, ...]}（同城车站视为可步行换乘）。
-pub fn parse_station_names_js(path: &Path) -> Result<HashMap<String, Vec<String>>, String> {
+/// station_name.js 单条条目（与 Python build_matcher 逐字段对齐）。
+#[derive(Debug, Clone)]
+pub struct StationEntry {
+    pub name: String,       // 中文站名（parts[1]）
+    pub telecode: String,   // 电报码（parts[2]）
+    pub pinyin: String,     // 拼音（parts[3]）
+    pub city_code: String,  // 城市代码（parts[6]，如 "0357" 表示北京）
+    pub city_name: String,  // 城市名（parts[7]，可空）
+}
+
+/// 解析 station_name.js → 逐条 (city_code, city_name, station_name)。
+///
+/// 城市名可空（部分条目无第 8 字段）；与 Python 的 split 逻辑一致
+/// （`station_names\s*=\s*'(.*)'`，城市名 = parts[7] 仅当存在时）。
+pub fn parse_station_names_full(path: &Path) -> Result<Vec<StationEntry>, String> {
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
     // 取 "station_names = '...'" 引号内内容（与 Python 的 split 逻辑一致）
     let start = text
@@ -121,7 +151,7 @@ pub fn parse_station_names_js(path: &Path) -> Result<HashMap<String, Vec<String>
         .ok_or("station_names 未找到")?;
     let end = text[start..].rfind('\'').map(|i| start + i).ok_or("引号未闭合")?;
     let content = &text[start + 1..end];
-    let mut city_groups: HashMap<String, Vec<String>> = HashMap::new();
+    let mut out = Vec::new();
     for entry in content.split('@') {
         let entry = entry.trim();
         if entry.is_empty() {
@@ -131,12 +161,22 @@ pub fn parse_station_names_js(path: &Path) -> Result<HashMap<String, Vec<String>
         if parts.len() < 7 {
             continue;
         }
-        let name = parts[1]; // 中文站名
-        let city_code = parts[6]; // 城市代码（如 "0357" 表示北京）
-        city_groups
-            .entry(city_code.to_string())
-            .or_default()
-            .push(name.to_string());
+        out.push(StationEntry {
+            name: parts[1].to_string(), // 中文站名
+            telecode: parts.get(2).map(|s| s.to_string()).unwrap_or_default(),
+            pinyin: parts.get(3).map(|s| s.to_string()).unwrap_or_default(),
+            city_code: parts[6].to_string(), // 城市代码（如 "0357" 表示北京）
+            city_name: parts.get(7).map(|s| s.to_string()).unwrap_or_default(),
+        });
+    }
+    Ok(out)
+}
+
+/// 解析 station_name.js → 城市分组 {city_code: [站名, ...]}（同城车站视为可步行换乘）。
+pub fn parse_station_names_js(path: &Path) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut city_groups: HashMap<String, Vec<String>> = HashMap::new();
+    for e in parse_station_names_full(path)? {
+        city_groups.entry(e.city_code).or_default().push(e.name);
     }
     Ok(city_groups)
 }
