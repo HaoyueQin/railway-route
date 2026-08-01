@@ -27,3 +27,6 @@ gui-test-screenshots/
 build/
 dist/
 *.spec
+
+# Rust 重构分支（master-v2）的工作区代码，不属于本分支内容
+rust/
