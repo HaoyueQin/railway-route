@@ -211,24 +211,27 @@ body.app-mode .resize-handle{display:block}
 .sr input[type=number]:focus{border-bottom-color:var(--accent)}
 
 /* ── 时间滚轮（时:分，仿滚轮拨动，整值顿挫）── */
-.wheel-row{display:flex;align-items:center;gap:2px;user-select:none;-webkit-user-select:none;touch-action:none}
-.wheel{position:relative;width:44px;height:130px;overflow:hidden;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--field-bg)}
+/* ── 滚轮（时间选择，v2 设计）：无边框融入下拉面板，选中行胶囊高亮 ── */
+.wheel-row{display:flex;align-items:center;justify-content:center;gap:7px;user-select:none;-webkit-user-select:none;touch-action:none}
+.wheel{position:relative;width:46px;height:130px;overflow:hidden;background:transparent}
 .wheel-view{position:absolute;inset:0;overflow:hidden}
 .wheel-items{position:absolute;left:0;right:0;top:0;will-change:transform;transform:translateY(var(--wy,0));transition:transform .16s cubic-bezier(.3,.7,.4,1)}
 .wheel.dragging .wheel-items{transition:none}
-.wheel-item{height:26px;line-height:26px;text-align:center;font-size:.82rem;font-weight:500;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer}
-.wheel-item::after{content:'';position:absolute;left:8px;right:8px;bottom:0;height:1px;background:var(--line)}
-.wheel-item.sel{color:var(--accent);font-weight:800;font-size:.9rem}
+.wheel-item{height:26px;line-height:26px;text-align:center;font-size:.85rem;font-weight:500;
+  color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;border-radius:8px;
+  transition:color .12s,transform .12s}
+.wheel-item.sel{color:var(--accent);font-weight:800;font-size:.95rem}
 /* 上下渐变遮罩：聚焦中间选中行 */
-.wheel-mask{position:absolute;inset:0;pointer-events:none;background:var(--wheel-mask-grad);border-radius:var(--r-sm)}
-/* 中间选中线（top 52 = 可视区居中行） */
-.wheel-rule{position:absolute;left:0;right:0;top:52px;height:26px;border-top:1.5px solid rgba(var(--accent-rgb),.5);border-bottom:1.5px solid rgba(var(--accent-rgb),.5);border-radius:3px;pointer-events:none;background:rgba(var(--accent-rgb),.05)}
+.wheel-mask{position:absolute;inset:0;pointer-events:none;background:var(--wheel-mask-grad)}
+/* 选中胶囊（top 52 = 可视区居中行） */
+.wheel-rule{position:absolute;left:3px;right:3px;top:52px;height:26px;border-radius:9px;
+  background:var(--accent-soft);pointer-events:none}
 /* 顿挫脉冲：跨整值瞬间高亮闪烁 */
 .wheel.stepped .wheel-rule{animation:wheelTick .18s ease-out}
 .wheel.stepped .wheel-item.sel{animation:wheelItemPulse .18s ease-out}
-@keyframes wheelTick{0%{background:rgba(var(--accent-rgb),.22);border-color:rgba(var(--accent-rgb),.9)}100%{background:rgba(var(--accent-rgb),.05);border-color:rgba(var(--accent-rgb),.5)}}
-@keyframes wheelItemPulse{0%{transform:scale(1.14)}100%{transform:scale(1)}}
-.wheel-colon{font-size:.95rem;font-weight:800;color:var(--ink);padding:0 2px}
+@keyframes wheelTick{0%{background:rgba(var(--accent-rgb),.28)}100%{background:var(--accent-soft)}}
+@keyframes wheelItemPulse{0%{transform:scale(1.12)}100%{transform:scale(1)}}
+.wheel-colon{font-size:1rem;font-weight:800;color:var(--ink);padding:0 1px}
 .wheel-unit{font-size:.66rem;font-weight:600;color:var(--secondary);margin:0 3px 0 1px}
 
 /* 换乘设置区：两组滚轮 + 右侧（最大换乘 / 指定换乘城市） */
@@ -254,10 +257,11 @@ body.app-mode .resize-handle{display:block}
   border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);
   transition:max-height .3s cubic-bezier(.2,.7,.3,1)}
 .time-pick.open .tp-pop{max-height:196px;border-color:rgba(var(--accent-rgb),.4)}
-.tp-pop .wheel-row{justify-content:center;padding:4px 0 0}
-.tp-pop .wheel{width:42px;height:118px}
-.tp-pop .wheel-item{height:24px;line-height:24px}
-.tp-pop .wheel-rule{top:47px;height:24px}
+.tp-pop .wheel-row{padding:7px 0 3px}
+.tp-pop .wheel{width:46px;height:118px}
+.tp-pop .wheel-item{height:24px;line-height:24px;font-size:.82rem}
+.tp-pop .wheel-item.sel{font-size:.92rem}
+.tp-pop .wheel-rule{top:47px;height:24px;left:2px;right:2px;border-radius:8px}
 .tp-clear{margin:2px auto 8px;display:block;font-size:.7rem;font-weight:600;color:var(--secondary);
   background:transparent;border:none;cursor:pointer;font-family:inherit;padding:3px 14px;border-radius:8px;transition:all .16s}
 .tp-clear:hover{color:var(--accent);background:var(--accent-soft)}
