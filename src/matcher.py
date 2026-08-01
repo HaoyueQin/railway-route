@@ -157,6 +157,41 @@ def fuzzy_match(query: str, graph, matcher: MatcherData) -> list[tuple[int, str]
         elif len(station_clean) >= 2 and station_clean in q_clean:
             add(110 + len(station_clean), station)
 
+    # 城市前缀扩散：q 以某城市名开头（北京西/上海虹桥/广州南）→ 该城市全部站。
+    # 贴近生活：输入"北京西"应能看到北京市所有站（同城换乘提示），而非仅有精确站与城市名。
+    for city_name, code in matcher.city_name_to_code.items():
+        if len(city_name) >= 2 and q_clean.startswith(city_name):
+            for name in matcher.city_to_stations.get(code, []):
+                add(160, name)
+            break
+
+    # 同城兜底扩散：已匹配到的车站满足以下任一条件 → 归并其所属城市全部站：
+    #   a) 班次稀疏（<25 班）的区级/县级地名（怀柔/广阳）→ 归市；
+    #   b) 站名去方位后缀（东/西/南/北）后的地名与同城组内其他站同名
+    #      （霸州西→"霸州"→组内有霸州/霸州北）→ 视为同城地名；
+    # 班次充足的独立站（燕郊 43 班/新县 35 班）与县级单站保持独立，
+    # 不扩散到市级（贴近生活：输入"新县"只应看到新县，而非信阳市全部站）
+    if results:
+        city_codes = set()
+        for _, name in results[:8]:
+            idx = graph.station_to_idx.get(name)
+            if idx is None:
+                continue
+            cc = matcher.station_to_city_code.get(name)
+            if not cc:
+                continue
+            n_dep = len(graph.departures.get(idx, ()))
+            if n_dep >= MIN_STATION_TRAINS_FOR_SINGLE:
+                # 班次充足：仅当"地名同名站"存在才扩散（霸州西→霸州）
+                base = name[:-1] if name[-1:] in ("东", "西", "南", "北") else name
+                same_group = matcher.city_to_stations.get(cc, [])
+                if not any(s == base and s != name for s in same_group):
+                    continue
+            city_codes.add(cc)
+        for cc in city_codes:
+            for name in matcher.city_to_stations.get(cc, []):
+                add(105, name)
+
     results.sort(key=lambda item: -item[0])
     return results
 
