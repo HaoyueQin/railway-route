@@ -339,13 +339,28 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
                 pass
 
         def toggle_maximize(self):
-            """最大化 ↔ 还原（pywebview 6.x Window.state 报告当前窗口状态）。"""
+            """最大化 ↔ 还原；返回切换后的状态（供前端同步按钮图标）。
+
+            Window.state 报告的是"请求过的状态"而非实时系统状态，直接依赖它
+            会在图标与真实窗口状态间漂移；这里用 state 判断 + 返回新状态，
+            前端以返回值驱动图标，双击/按钮/系统快捷键统一由返回值同步。
+            """
             try:
                 w = webview.windows[0]
                 if w.state == "maximized":
                     w.restore()
-                else:
-                    w.maximize()
+                    return False
+                w.maximize()
+                return True
+            except Exception:
+                return None
+
+        def resize_window(self, width, height):
+            """前端边缘热区拖拽调整窗口大小（frameless 无系统 resize 边框）。"""
+            try:
+                w = webview.windows[0]
+                # 固定左上角缩放：右/下/右下角拖拽行为正确
+                w.resize(int(width), int(height))
             except Exception:
                 pass
 
@@ -360,6 +375,8 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
             title, url + "?app=1",  # ?app=1: 前端自绘标题栏的显式信号（不依赖 JS 桥注入时序）
             width=1280, height=880, min_size=(980, 640),
             frameless=True,          # 无系统边框，标题栏由前端自绘
+            easy_drag=False,         # 关闭整窗拖拽：仅前端 titlebar（-webkit-app-region: drag）可拖动
+            resizable=True,          # 配合前端边缘热区实现手动调整大小
             background_color="#e0e7ff",
             js_api=WindowApi(),
         )

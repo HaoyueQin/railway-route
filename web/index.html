@@ -94,10 +94,26 @@
             时间约束 <span class="adv-hint">（留空 = 全天）</span>
           </div>
           <div class="adv-grid2">
-            <div class="fld"><label class="fld-lbl" for="dep-after">出发不早于</label><input id="dep-after" class="inp" type="time"></div>
-            <div class="fld"><label class="fld-lbl" for="dep-before">出发不晚于</label><input id="dep-before" class="inp" type="time"></div>
-            <div class="fld"><label class="fld-lbl" for="arr-after">到达不早于</label><input id="arr-after" class="inp" type="time"></div>
-            <div class="fld"><label class="fld-lbl" for="arr-before">到达不晚于</label><input id="arr-before" class="inp" type="time"></div>
+            <div class="fld"><label class="fld-lbl" for="dep-after">出发不早于</label>
+              <div class="time-pick" id="dep-after" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+              </div></div>
+            <div class="fld"><label class="fld-lbl" for="dep-before">出发不晚于</label>
+              <div class="time-pick" id="dep-before" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+              </div></div>
+            <div class="fld"><label class="fld-lbl" for="arr-after">到达不早于</label>
+              <div class="time-pick" id="arr-after" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+              </div></div>
+            <div class="fld"><label class="fld-lbl" for="arr-before">到达不晚于</label>
+              <div class="time-pick" id="arr-before" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+              </div></div>
           </div>
         </div>
       </div>
@@ -109,15 +125,9 @@
           </div>
           <div class="xfer-grid">
             <div class="fld"><label class="fld-lbl">同站换乘</label>
-              <div class="wheel-row" id="same-wheel">
-                <div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时</span><span class="wheel-colon">:</span>
-                <div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">分</span>
-              </div></div>
+              <div class="wheel-row" id="same-wheel"></div></div>
             <div class="fld"><label class="fld-lbl">异站换乘</label>
-              <div class="wheel-row" id="inter-wheel">
-                <div class="wheel" data-kind="h"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">时</span><span class="wheel-colon">:</span>
-                <div class="wheel" data-kind="m"><div class="wheel-view"><div class="wheel-items"></div></div><div class="wheel-mask"></div><div class="wheel-rule"></div></div><span class="wheel-unit">分</span>
-              </div></div>
+              <div class="wheel-row" id="inter-wheel"></div></div>
             <div class="xfer-side">
               <div class="fld"><label class="fld-lbl">最大换乘</label>
                 <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>

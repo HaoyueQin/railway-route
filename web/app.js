@@ -6,10 +6,9 @@
 // ── 状态 ──
 const _form = { matchMode: "fuzzy", profile: "balanced", fromMode: null, toMode: null };
 // fromMode/toMode：null=跟随全局匹配模式；"fuzzy"/"exact"=该端独立选择
-const _sf = { sort: "score", xfer: "all", city: "" };      // 排序筛选状态
+const _sf = { sort: "score", xfer: "all", city: "", view: "direct" }; // 排序筛选状态 + 直达/换乘视图
 const _trainCache = new Map();                              // 车次全程时刻表缓存
 let _routesData = null;
-let _showCount = 30;                                        // 结果分批展示数量
 
 // ── 工具 ──
 function $id(x) { return document.getElementById(x); }
@@ -127,18 +126,64 @@ function initAppMode() {
   const close = document.getElementById("tb-close");
   if (min) min.addEventListener("click", () => { try { window.pywebview.api.minimize(); } catch (e) {} });
   if (close) close.addEventListener("click", () => { try { window.pywebview.api.close(); } catch (e) {} });
-  // 最大化/还原：点击切换图标，双击标题栏拖动区也可切换（Windows 习惯）
-  if (maxBtn) maxBtn.addEventListener("click", () => {
+  // 最大化/还原：点击切换图标；双击标题栏拖动区也可切换（Windows 习惯）。
+  // 图标状态以 js_api 返回值同步（而非本地猜测），双击/按钮/系统操作统一。
+  const toggleMax = async () => {
     try {
-      window.pywebview.api.toggle_maximize();
-      maxBtn.classList.toggle("maxed");
-      maxBtn.title = maxBtn.classList.contains("maxed") ? "还原" : "最大化";
+      const maxed = await window.pywebview.api.toggle_maximize();
+      if (maxed === null) return;
+      maxBtn.classList.toggle("maxed", !!maxed);
+      maxBtn.title = maxed ? "还原" : "最大化";
     } catch (e) {}
-  });
+  };
+  if (maxBtn) maxBtn.addEventListener("click", toggleMax);
   if (tb) {
     const brand = tb.querySelector(".tb-brand");
-    if (brand) brand.addEventListener("dblclick", () => maxBtn && maxBtn.click());
+    if (brand) brand.addEventListener("dblclick", toggleMax);
   }
+  initResizeHandles();
+}
+
+// frameless 窗口无系统调整大小边框：在窗口边缘放置透明热区，
+// 拖拽时经 js_api 调用 resize（固定左上角缩放 → 右/下/右下角行为正确）。
+function initResizeHandles() {
+  if (document.getElementById("resize-e")) return;
+  const mk = (id, cls, cursor) => {
+    const el = document.createElement("div");
+    el.id = id;
+    el.className = "resize-handle " + cls;
+    el.style.cursor = cursor;
+    document.body.appendChild(el);
+    return el;
+  };
+  const hE = mk("resize-e", "re-e", "ew-resize");
+  const hS = mk("resize-s", "re-s", "ns-resize");
+  const hSE = mk("resize-se", "re-se", "nwse-resize");
+  const THROTTLE = 16;
+  const startResize = (handle, mode) => e => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const w0 = window.innerWidth, h0 = window.innerHeight;
+    let last = 0;
+    const move = ev => {
+      const now = performance.now();
+      if (now - last < THROTTLE) return;
+      last = now;
+      let nw = w0, nh = h0;
+      if (mode === "e" || mode === "se") nw = Math.max(640, w0 + (ev.clientX - startX));
+      if (mode === "s" || mode === "se") nh = Math.max(480, h0 + (ev.clientY - startY));
+      try { window.pywebview.api.resize_window(nw, nh); } catch (err) {}
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  };
+  hE.addEventListener("pointerdown", startResize(hE, "e"));
+  hS.addEventListener("pointerdown", startResize(hS, "s"));
+  hSE.addEventListener("pointerdown", startResize(hSE, "se"));
 }
 if (window.pywebview) initAppMode();
 window.addEventListener("pywebviewready", initAppMode);
@@ -151,10 +196,124 @@ const RULE_TOP = 52;   // 选中行顶部距可视区顶部（= (130 - 26) / 2�
 const WHEEL_ITEMS = { h: 24, m: 60 };   // 小时 0-23 / 分钟 0-59
 const _wheelState = { same: { h: 0, m: 15 }, inter: { h: 1, m: 0 } };
 _form.sameMin = 15; _form.interMin = 60;
+// 时间约束（4 个字段：null = 全天不限）
+_form.times = { depAfter: null, depBefore: null, arrAfter: null, arrBefore: null };
 
+// 单个滚轮（动态构建；换乘设置与时间约束选择器共用）
+function createWheel(host, kind, initValue, onValue) {
+  const max = WHEEL_ITEMS[kind] - 1;
+  const w = document.createElement("div");
+  w.className = "wheel";
+  const view = document.createElement("div");
+  view.className = "wheel-view";
+  const itemsEl = document.createElement("div");
+  itemsEl.className = "wheel-items";
+  const frag = document.createDocumentFragment();
+  for (let v = 0; v <= max; v++) {
+    const it = document.createElement("div");
+    it.className = "wheel-item";
+    it.dataset.v = v;
+    it.textContent = String(v).padStart(2, "0");
+    frag.appendChild(it);
+  }
+  itemsEl.appendChild(frag);
+  view.appendChild(itemsEl);
+  const mask = document.createElement("div");
+  mask.className = "wheel-mask";
+  const rule = document.createElement("div");
+  rule.className = "wheel-rule";
+  w.appendChild(view); w.appendChild(mask); w.appendChild(rule);
+  host.appendChild(w);
+
+  const setSel = v => {
+    itemsEl.querySelectorAll(".wheel-item").forEach(it => it.classList.toggle("sel", +it.dataset.v === v));
+  };
+  const render = () => {
+    itemsEl.style.setProperty("--wy", (RULE_TOP - pos * ITEM_H) + "px");
+    setSel(Math.max(0, Math.min(max, Math.round(pos))));
+  };
+  let pos = Math.max(0, Math.min(max, initValue));
+  render();
+
+  const tick = () => {
+    w.classList.remove("stepped");
+    void w.offsetWidth;
+    w.classList.add("stepped");
+  };
+  // 滚轮步进：跨整值瞬间触发顿挫脉冲
+  const step = d => {
+    const np = Math.max(0, Math.min(max, pos + d));
+    if (np === pos) return;
+    pos = np;
+    render();
+    tick();
+    onValue(Math.round(pos));
+  };
+  w.addEventListener("wheel", e => {
+    e.preventDefault();
+    step(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+  // 键盘步进（可聚焦控件）
+  w.tabIndex = 0;
+  w.addEventListener("keydown", e => {
+    if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
+  });
+  // 点击某项直接选择（pointer capture 会把 click 目标归到捕获元素，
+  // 需用坐标反查实际命中的 item）；阻止冒泡：滚轮在时间选择器面板内时，
+  // 点击不应触发 document 的"点击外部关闭面板"
+  w.addEventListener("click", e => {
+    e.stopPropagation();
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const it = hit && hit.closest ? hit.closest(".wheel-item") : null;
+    if (!it) return;
+    step(+it.dataset.v - Math.round(pos));
+  });
+
+  // 拖拽 + 惯性 + 吸附
+  let dragging = false, startY = 0, startPos = 0, lastY = 0, lastT = 0, vels = [], lastInt = Math.round(pos);
+  w.addEventListener("pointerdown", e => {
+    dragging = true;
+    w.classList.add("dragging");
+    startY = e.clientY; startPos = pos; lastY = e.clientY; lastT = performance.now();
+    vels = []; lastInt = Math.round(pos);
+    w.setPointerCapture(e.pointerId);
+  });
+  w.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    const now = performance.now();
+    const dt = now - lastT;
+    if (dt > 8) { vels.push((e.clientY - lastY) / dt); if (vels.length > 6) vels.shift(); lastY = e.clientY; lastT = now; }
+    const np = Math.max(-1.5, Math.min(max + 1.5, startPos - dy / ITEM_H));
+    pos = np; render();
+    const curInt = Math.round(np);
+    if (curInt !== lastInt) { lastInt = curInt; tick(); }
+  });
+  const finish = e => {
+    if (!dragging) return;
+    dragging = false;
+    w.classList.remove("dragging");
+    const vel = vels.length ? vels.reduce((a, b) => a + b, 0) / vels.length : 0;
+    const target = Math.round(pos - vel * 0.18);
+    const finalPos = Math.max(0, Math.min(max, target));
+    itemsEl.style.transition = "transform .38s cubic-bezier(.22,1,.36,1)";
+    pos = finalPos; render();
+    setTimeout(() => { itemsEl.style.transition = ""; }, 400);
+    onValue(finalPos);
+  };
+  w.addEventListener("pointerup", finish);
+  w.addEventListener("pointercancel", finish);
+
+  return {
+    setValue(v) { pos = Math.max(0, Math.min(max, v)); render(); },
+  };
+}
+
+// 换乘设置的"时:分"滚轮对（同站/异站）
 function initWheel(rowId, key, onChange) {
   const row = $id(rowId);
-  const wheels = row.querySelectorAll(".wheel");
+  row.innerHTML = "";
   const onSel = (h, m) => {
     _wheelState[key] = { h, m };
     _form[key === "same" ? "sameMin" : "interMin"] = h * 60 + m;
@@ -165,107 +324,61 @@ function initWheel(rowId, key, onChange) {
     });
     if (onChange) onChange(h, m);
   };
-  wheels.forEach(w => {
-    const kind = w.dataset.kind;
-    const max = WHEEL_ITEMS[kind] - 1;
-    const view = w.querySelector(".wheel-view");
-    const itemsEl = w.querySelector(".wheel-items");
-    const frag = document.createDocumentFragment();
-    for (let v = 0; v <= max; v++) {
-      const it = document.createElement("div");
-      it.className = "wheel-item";
-      it.dataset.v = v;
-      it.textContent = String(v).padStart(2, "0");
-      frag.appendChild(it);
-    }
-    itemsEl.appendChild(frag);
-    const setSel = v => {
-      itemsEl.querySelectorAll(".wheel-item").forEach(it => it.classList.toggle("sel", +it.dataset.v === v));
-    };
-    const render = () => {
-      itemsEl.style.setProperty("--wy", (RULE_TOP - pos * ITEM_H) + "px");
-      // 高亮可视区内最接近选中线的项
-      setSel(Math.max(0, Math.min(max, Math.round(pos))));
-    };
-    let pos = Math.max(0, Math.min(max, kind === "h" ? _wheelState[key].h : _wheelState[key].m));
-    render();
-
-    // 滚轮步进：跨整值瞬间触发顿挫脉冲
-    const step = d => {
-      const np = Math.max(0, Math.min(max, pos + d));
-      if (np === pos) return;
-      pos = np;
-      render();
-      w.classList.remove("stepped");
-      void w.offsetWidth;             // 重启动画
-      w.classList.add("stepped");
-      if (kind === "h") onSel(pos, _wheelState[key].m); else onSel(_wheelState[key].h, pos);
-    };
-    w.addEventListener("wheel", e => {
-      e.preventDefault();
-      step(e.deltaY > 0 ? 1 : -1);
-    }, { passive: false });
-    // 键盘步进（可聚焦控件）
-    w.tabIndex = 0;
-    w.addEventListener("keydown", e => {
-      if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
-    });
-    // 点击某项直接选择（pointer capture 会把 click 目标归到捕获元素，
-    // 需用坐标反查实际命中的 item）
-    w.addEventListener("click", e => {
-      const hit = document.elementFromPoint(e.clientX, e.clientY);
-      const it = hit && hit.closest ? hit.closest(".wheel-item") : null;
-      if (!it) return;
-      step(+it.dataset.v - Math.round(pos));
-    });
-
-    // 拖拽 + 惯性 + 吸附
-    let dragging = false, startY = 0, startPos = 0, lastY = 0, lastT = 0, vels = [], lastInt = Math.round(pos);
-    const tick = () => {
-      w.classList.remove("stepped");
-      void w.offsetWidth;
-      w.classList.add("stepped");
-    };
-    w.addEventListener("pointerdown", e => {
-      dragging = true;
-      w.classList.add("dragging");
-      startY = e.clientY; startPos = pos; lastY = e.clientY; lastT = performance.now();
-      vels = []; lastInt = Math.round(pos);
-      w.setPointerCapture(e.pointerId);
-    });
-    w.addEventListener("pointermove", e => {
-      if (!dragging) return;
-      const dy = e.clientY - startY;
-      const now = performance.now();
-      const dt = now - lastT;
-      if (dt > 8) { vels.push((e.clientY - lastY) / dt); if (vels.length > 6) vels.shift(); lastY = e.clientY; lastT = now; }
-      const np = Math.max(-1.5, Math.min(max + 1.5, startPos - dy / ITEM_H));
-      pos = np; render();
-      // 划过整值瞬间：顿挫脉冲（视觉咔哒感）
-      const curInt = Math.round(np);
-      if (curInt !== lastInt) { lastInt = curInt; tick(); }
-    });
-    const finish = e => {
-      if (!dragging) return;
-      dragging = false;
-      w.classList.remove("dragging");
-      const vel = vels.length ? vels.reduce((a, b) => a + b, 0) / vels.length : 0;
-      const target = Math.round(pos - vel * 0.18);   // 惯性偏移
-      const finalPos = Math.max(0, Math.min(max, target));
-      itemsEl.style.transition = "transform .38s cubic-bezier(.22,1,.36,1)";
-      pos = finalPos; render();
-      setTimeout(() => { itemsEl.style.transition = ""; }, 400);
-      if (kind === "h") onSel(finalPos, _wheelState[key].m); else onSel(_wheelState[key].h, finalPos);
-    };
-    w.addEventListener("pointerup", finish);
-    w.addEventListener("pointercancel", finish);
-  });
-  onSel(_wheelState[key].h, _wheelState[key].m);
+  const hW = createWheel(row, "h", _wheelState[key].h, v => onSel(v, _wheelState[key].m));
+  const unitH = document.createElement("span"); unitH.className = "wheel-unit"; unitH.textContent = "时";
+  const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
+  const mW = createWheel(row, "m", _wheelState[key].m, v => onSel(_wheelState[key].h, v));
+  const unitM = document.createElement("span"); unitM.className = "wheel-unit"; unitM.textContent = "分";
+  row.appendChild(unitH); row.appendChild(colon); row.appendChild(unitM);
+  void hW; void mW;
 }
 
 initWheel("same-wheel", "same");
 initWheel("inter-wheel", "inter");
+
+// 时间约束选择器：外壳形似输入框，点击弹出滚轮面板（与换乘设置同款滚轮）
+function initTimePicker(id, key) {
+  const el = $id(id);
+  const valEl = el.querySelector(".tp-val");
+  const pop = el.querySelector(".tp-pop");
+  const row = pop.querySelector(".wheel-row");
+  let h = 0, m = 0;
+  const paint = () => {
+    const empty = valEl.dataset.empty === "1";
+    valEl.textContent = empty ? "--:--" : String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    valEl.classList.toggle("tp-set", !empty);
+    _form.times[key] = empty ? null : h * 60 + m;
+  };
+  const setPop = open => {
+    pop.classList.toggle("open", open);
+    el.classList.toggle("open", open);
+    el.setAttribute("aria-expanded", String(open));
+  };
+  createWheel(row, "h", h, v => { h = v; valEl.dataset.empty = "0"; paint(); });
+  const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
+  createWheel(row, "m", m, v => { m = v; valEl.dataset.empty = "0"; paint(); });
+  row.appendChild(colon);
+  pop.querySelector(".tp-clear").addEventListener("click", e => {
+    e.stopPropagation();
+    valEl.dataset.empty = "1";
+    paint();
+    setPop(false);
+  });
+  el.addEventListener("click", e => {
+    e.stopPropagation();
+    setPop(!pop.classList.contains("open"));
+  });
+}
+["dep-after", "dep-before", "arr-after", "arr-before"].forEach((id, i) => {
+  initTimePicker(id, ["depAfter", "depBefore", "arrAfter", "arrBefore"][i]);
+});
+document.addEventListener("click", () => {
+  document.querySelectorAll(".time-pick.open").forEach(el => {
+    el.classList.remove("open");
+    const pop = el.querySelector(".tp-pop");
+    if (pop) pop.classList.remove("open");
+  });
+});
 
 // 最大换乘滑块与数字同步
 ["max"].forEach(k => {
@@ -313,16 +426,20 @@ async function search() {
   const p = new URLSearchParams({ from, to, match_mode: _form.matchMode, search_profile: _form.profile });
   if (_form.fromMode) p.set("from_mode", _form.fromMode);
   if (_form.toMode) p.set("to_mode", _form.toMode);
-  ["dep-after", "dep-before", "arr-after", "arr-before"].forEach(id => {
-    const v = $id(id).value;
-    if (v) p.set(id.replace("-", "_"), v);
+  // 时间约束（滚轮选择器；null = 不限）
+  const times = [
+    ["depAfter", "dep_after"], ["depBefore", "dep_before"],
+    ["arrAfter", "arr_after"], ["arrBefore", "arr_before"],
+  ];
+  times.forEach(([k, param]) => {
+    const v = _form.times[k];
+    if (v !== null && v !== undefined) p.set(param, String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0"));
   });
   p.set("same_transfer", _form.sameMin);
   p.set("inter_transfer", _form.interMin);
   p.set("max_transfers", $id("max-num").value);
   const xf = $id("xfer-at").value.trim();
   if (xf) p.set("xfer_at", xf);
-  _showCount = 30;
   $id("results").innerHTML = '<div class="empty search-loading"><span class="spinner" aria-hidden="true"></span>搜索中…</div>';
   let d;
   try {
@@ -343,18 +460,32 @@ async function search() {
   render();
 }
 
-// ── 渲染：meta + 排序筛选条 + 路线列表 ──
+// ── 渲染：meta + 直达/换乘视图 Tab + 排序筛选条 + 路线列表 ──
 function render() {
   if (!_routesData) return;
   const d = _routesData;
   const direct = d.routes.filter(r => r.train_transfers === 0 && r.interstation_transfers === 0);
   const xfer = d.routes.filter(r => !(r.train_transfers === 0 && r.interstation_transfers === 0));
+  if (!_sf.view || (_sf.view !== "direct" && _sf.view !== "xfer")) _sf.view = "direct";
+  // 当前视图无结果而另一视图有结果 → 自动切到有结果的视图（避免空视图开局）
+  if ((_sf.view === "direct" && direct.length === 0 && xfer.length > 0) ||
+      (_sf.view === "xfer" && xfer.length === 0 && direct.length > 0)) {
+    _sf.view = _sf.view === "direct" ? "xfer" : "direct";
+  }
 
   let h = '<div class="meta">'
     + "<span>" + d.routes.length + " 个方案（直达 " + direct.length + " · 换乘 " + xfer.length + "）</span>"
     + "<span>" + d.time + "s · 扫描 " + d.scanned + " 条</span>"
     + (d.cached ? '<span class="mtag-hit">' + icon("bolt") + ' 缓存命中</span>' : "")
     + (d.complete ? "" : '<span class="mtag">' + icon("alert") + ' 搜索未完整</span>')
+    + "</div>";
+
+  // 直达 / 换乘 视图切换（左右两个按钮，居中）
+  h += '<div class="view-tabs">'
+    + '<button type="button" class="vt-btn' + (_sf.view === "direct" ? " sel" : "") + '" data-view="direct">'
+    + icon("direct") + '直达方案 <span class="vt-cnt">' + direct.length + "</span></button>"
+    + '<button type="button" class="vt-btn' + (_sf.view === "xfer" ? " sel" : "") + '" data-view="xfer">'
+    + icon("repeat") + '换乘方案 <span class="vt-cnt">' + xfer.length + "</span></button>"
     + "</div>";
 
   h += '<div class="sf-bar" id="sf-bar">'
@@ -385,10 +516,17 @@ function render() {
 
   $id("sf-city").value = _sf.city;
   $id("sf-city").addEventListener("input", () => { _sf.city = $id("sf-city").value.trim(); renderList(); });
-  $id("sf-clear").addEventListener("click", () => { _sf.sort = "score"; _sf.xfer = "all"; _sf.city = ""; _showCount = 30; render(); });
+  $id("sf-clear").addEventListener("click", () => { _sf.sort = "score"; _sf.xfer = "all"; _sf.city = ""; render(); });
 
-  // 事件委托：卡片展开/收起 + 完整时刻表折叠 + 加载更多
-  $id("route-list").addEventListener("click", e => {
+  // 事件委托（绑 #results 而非 #route-list：vt-btn 在 route-list 之外）
+  $id("results").addEventListener("click", e => {
+    const vt = e.target.closest(".vt-btn");
+    if (vt) {
+      _sf.view = vt.dataset.view;
+      document.querySelectorAll(".vt-btn").forEach(b => b.classList.toggle("sel", b === vt));
+      renderList();
+      return;
+    }
     const more = e.target.closest(".tt-more");
     if (more) {
       const holder = more.closest(".tt-card");
@@ -397,16 +535,6 @@ function render() {
         more.textContent = holder.classList.contains("full") ? "▴ 收起完整时刻表" : "▾ 查看完整时刻表";
       }
       return;
-    }
-    if (e.target.id === "load-more") {
-      _showCount += 30;
-      renderList();
-      return;
-    }
-    const card = e.target.closest(".rc");
-    if (card && !e.target.closest(".cdd, .tt-more, #load-more")) {
-      card.classList.toggle("expanded");
-      if (card.classList.contains("expanded")) ensureTimetable(card);
     }
   });
 
@@ -418,7 +546,11 @@ function renderList() {
   const list = $id("route-list");
   if (!list || !_routesData) return;
   let routes = [..._routesData.routes];
-  const { sort, xfer, city } = _sf;
+  const { sort, xfer, city, view } = _sf;
+
+  // 视图 Tab：直达 / 换乘（完全展开，不分批）
+  if (view === "direct") routes = routes.filter(r => r.train_transfers === 0 && r.interstation_transfers === 0);
+  else if (view === "xfer") routes = routes.filter(r => !(r.train_transfers === 0 && r.interstation_transfers === 0));
 
   if (xfer === "direct") routes = routes.filter(r => r.train_transfers === 0 && r.interstation_transfers === 0);
   else if (xfer === "same") routes = routes.filter(r => r.train_transfers > 0 && r.interstation_transfers === 0);
@@ -437,23 +569,18 @@ function renderList() {
   else if (sort === "xfer") routes.sort((a, b) =>
     (a.train_transfers + a.interstation_transfers) - (b.train_transfers + b.interstation_transfers));
 
-  const direct = routes.filter(r => r.train_transfers === 0 && r.interstation_transfers === 0);
-  const xferRoutes = routes.filter(r => !(r.train_transfers === 0 && r.interstation_transfers === 0));
-
   if (!routes.length) {
-    list.innerHTML = '<div class="empty">' + icon("inbox") + ' 当前筛选条件下无匹配方案</div>';
+    list.innerHTML = '<div class="empty">' + icon("inbox") + ' 当前视图下无匹配方案</div>';
     return;
   }
 
-  // 分批展示：前 _showCount 条 + 加载更多（大批量结果不全量渲染 DOM）
-  const shown = routes.slice(0, _showCount);
-  const shownDirect = shown.filter(r => r.train_transfers === 0 && r.interstation_transfers === 0);
-  const shownXfer = shown.filter(r => !(r.train_transfers === 0 && r.interstation_transfers === 0));
-  let h = renderGroup(shownDirect, "直达方案", 0, direct.length) + renderGroup(shownXfer, "换乘方案", shownDirect.length, xferRoutes.length);
-  if (routes.length > _showCount) {
-    h += '<div class="lm-w"><button id="load-more" class="sf-clear" type="button">显示更多（剩余 ' + (routes.length - _showCount) + " 条）</button></div>";
-  }
-  list.innerHTML = h;
+  const label = view === "direct" ? "直达方案" : "换乘方案";
+  list.innerHTML = renderGroup(routes, label, 0, routes.length);
+  // 完全展开：卡片默认展开，时刻表懒加载
+  list.querySelectorAll(".rc").forEach(card => {
+    card.classList.add("expanded");
+    ensureTimetable(card);
+  });
 }
 
 // ── 路线卡片分组（含入场动效 stagger）──

@@ -32,7 +32,14 @@
 html{font-size:17px;-webkit-text-size-adjust:100%}
 body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01" 1,"cv01" 1}
 /* 时刻/里程等数字一律等宽对齐（tabular-nums）——排版细节决定高级感 */
-.num,.rc-time,.rc-node-time,.rc-arrow-time,.tt-tbl td,.tt-tbl th,.sf-bar input,.sr input[type=number],.inp[type=time]{font-variant-numeric:tabular-nums}
+.num,.rc-time,.rc-node-time,.rc-arrow-time,.tt-tbl td,.tt-tbl th,.sf-bar input,.sr input[type=number],.tp-val{font-variant-numeric:tabular-nums}
+
+/* ── 滚动条（细圆角半透明，契合玻璃态；hover 强调色）── */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.32);border-radius:8px;border:2.5px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(79,70,229,.4);border:2.5px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}
 
 /* ── 桌面应用自绘标题栏（pywebview frameless 模式）── */
 #titlebar{position:fixed;top:0;left:0;right:0;height:40px;z-index:400;display:flex;
@@ -55,7 +62,16 @@ body{font-family:var(--font-sans);min-height:100vh;background:var(--bg);color:va
 .tb-btn.maxed .ic-restore{display:block}
 .tb-btn:hover{background:rgba(30,41,59,.07);color:var(--ink)}
 .tb-btn.tb-close:hover{background:rgba(220,38,38,.92);color:#fff}
-body.app-mode .nv{top:40px}
+/* app 模式：页面导航与自绘标题栏内容重复，隐藏导航、上移 hero */
+body.app-mode .nv{display:none}
+body.app-mode .hero{padding-top:74px}
+
+/* ── frameless 窗口边缘调整大小热区（透明，仅 cursor 提示）── */
+.resize-handle{position:fixed;z-index:500;display:none}
+body.app-mode .resize-handle{display:block}
+.re-e{top:40px;right:0;bottom:0;width:7px}
+.re-s{left:0;right:0;bottom:0;height:7px}
+.re-se{right:0;bottom:0;width:18px;height:18px}
 
 /* ── 背景：多色渐变底图 + Canvas 实时流动色块（粉 / 蓝紫 / 青绿）── */
 .bg-flow{position:fixed;inset:0;z-index:-2;overflow:hidden;background:linear-gradient(135deg,#e0e7ff 0%,#fce7f3 40%,#d1fae5 70%,#e0e7ff 100%)}
@@ -171,12 +187,38 @@ body.app-mode .nv{top:40px}
 .xfer-side{display:flex;flex-direction:column;gap:10px;min-width:0}
 .xfer-side .sr{max-width:300px}
 
+/* ── 时间约束选择器（外壳形似输入框 + 就地展开滚轮面板）。
+   不用弹出层：高级选项容器 overflow:hidden 会裁剪 absolute 面板（分钟滚轮不可点），
+   就地展开不受影响，且滚动跟随内容。 */
+.time-pick{position:relative;display:flex;flex-direction:column;min-width:118px;cursor:pointer;user-select:none}
+.tp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:11px 13px;font-size:.95rem;color:var(--ink);background:rgba(255,255,255,.9);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  transition:border-color .22s,box-shadow .22s,border-radius .2s}
+.time-pick:hover .tp-head{border-color:rgba(79,70,229,.35)}
+.time-pick.open .tp-head{border-color:var(--accent);box-shadow:0 0 0 3.5px rgba(79,70,229,.13);border-radius:var(--r-md) var(--r-md) 0 0}
+.tp-val{flex:1;font-weight:600;letter-spacing:.5px;color:#c3cad6}
+.tp-val.tp-set{color:var(--ink)}
+.tp-caret{width:0;height:0;border-left:4.5px solid transparent;border-right:4.5px solid transparent;border-top:5.5px solid var(--secondary);transition:transform .25s cubic-bezier(.2,.7,.3,1);flex:none}
+.time-pick.open .tp-caret{transform:rotate(180deg)}
+.tp-pop{max-height:0;overflow:hidden;background:rgba(255,255,255,.97);
+  border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);
+  transition:max-height .3s cubic-bezier(.2,.7,.3,1)}
+.time-pick.open .tp-pop{max-height:196px;border-color:rgba(79,70,229,.4)}
+.tp-pop .wheel-row{justify-content:center;padding:4px 0 0}
+.tp-pop .wheel{width:42px;height:118px}
+.tp-pop .wheel-item{height:24px;line-height:24px}
+.tp-pop .wheel-rule{top:47px;height:24px}
+.tp-clear{margin:2px auto 8px;display:block;font-size:.7rem;font-weight:600;color:var(--secondary);
+  background:transparent;border:none;cursor:pointer;font-family:inherit;padding:3px 14px;border-radius:8px;transition:all .16s}
+.tp-clear:hover{color:var(--accent);background:var(--accent-soft)}
+
 /* Suggestions */
 .sgs{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
 .sg{font-size:.67rem;padding:3px 11px;border-radius:18px;border:1px solid var(--line);background:rgba(255,255,255,.65);color:var(--ink-2);cursor:pointer;font-family:inherit;transition:all .18s}
 .sg:hover{border-color:rgba(79,70,229,.4);color:var(--accent);background:#fff}
 
-/* ── 下拉 ── */
+/* ── 下拉（选项全部展示，不限制高度与滚动）── */
 .cdd{position:relative;display:inline-block;width:100%}
 .cd.z-top,#results.z-top{position:relative;z-index:300}
 .cdd-btn{width:100%;padding:6px 2px;font-size:.86rem;font-family:inherit;color:var(--ink);background:transparent;border:none;border-bottom:1.5px solid var(--line);border-radius:0;text-align:left;cursor:pointer;outline:none;transition:border-color .22s;position:relative}
@@ -184,8 +226,8 @@ body.app-mode .nv{top:40px}
 .cdd.open .cdd-btn::after{transform:translateY(-50%) rotate(180deg)}
 .cdd-btn:hover{border-bottom-color:rgba(79,70,229,.4)}
 .cdd.open .cdd-btn{border-bottom-color:var(--accent)}
-.cdd-panel{display:block;position:absolute;top:100%;left:0;right:0;z-index:200;margin-top:4px;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-mat);overflow:hidden;max-height:0;overflow-y:auto;opacity:0;transform:translateY(-4px);transition:max-height .3s cubic-bezier(.2,.7,.3,1),opacity .25s ease,transform .3s cubic-bezier(.2,.7,.3,1);pointer-events:none}
-.cdd.open .cdd-panel{max-height:230px;opacity:1;transform:translateY(0);pointer-events:auto}
+.cdd-panel{position:absolute;top:100%;left:0;right:0;z-index:200;margin-top:4px;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-mat);overflow:visible;opacity:0;transform:translateY(-4px);transition:opacity .22s ease,transform .22s cubic-bezier(.2,.7,.3,1);pointer-events:none}
+.cdd.open .cdd-panel{opacity:1;transform:translateY(0);pointer-events:auto}
 .cdd-opt{padding:8px 12px;font-size:.84rem;color:var(--ink);cursor:pointer;transition:background .14s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cdd-opt:hover{background:var(--accent-soft);color:var(--accent)}
 .cdd-opt.sel{background:var(--accent-soft);color:var(--accent);font-weight:700}
@@ -196,14 +238,24 @@ body.app-mode .nv{top:40px}
 .mtag{font-size:.64rem;font-weight:700;padding:2px 9px;border-radius:6px;background:rgba(217,119,6,.1);color:var(--warn)}
 .mtag-hit{font-size:.64rem;font-weight:700;padding:2px 9px;border-radius:6px;background:rgba(5,150,105,.1);color:var(--ok)}
 
-.sf-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;margin-bottom:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
-.sf-bar .cdd{width:auto;min-width:112px}
+.sf-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;margin-bottom:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}.sf-bar .cdd{width:auto;min-width:112px}
 .sf-bar .cdd-btn{padding:5px 22px 5px 11px;font-size:.74rem;border:1px solid var(--line);border-radius:var(--r-sm);background:rgba(255,255,255,.75);color:var(--ink-2)}
 .sf-bar input{font-size:.74rem;padding:5px 11px;border:1px solid var(--line);border-radius:var(--r-sm);background:rgba(255,255,255,.75);color:var(--ink-2);font-family:inherit;outline:none;width:132px}
 .sf-bar input:focus{border-color:var(--accent)}
 .sf-bar label{font-size:.68rem;color:var(--secondary);font-weight:600;letter-spacing:.4px;text-transform:uppercase}
 .sf-clear{font-size:.7rem;font-weight:600;padding:5px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:rgba(255,255,255,.7);color:var(--ink-2);cursor:pointer;font-family:inherit;transition:all .18s}
 .sf-clear:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── 直达 / 换乘视图切换（左右两个按钮，居中）── */
+.view-tabs{display:flex;justify-content:center;gap:10px;margin:2px 0 12px}
+.vt-btn{display:inline-flex;align-items:center;gap:7px;font-size:.86rem;font-weight:700;font-family:inherit;
+  padding:9px 26px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.72);
+  color:var(--ink-2);cursor:pointer;transition:all .2s cubic-bezier(.2,.7,.3,1)}
+.vt-btn .ic{width:.98em;height:.98em}
+.vt-btn:hover{border-color:rgba(79,70,229,.4);color:var(--ink)}
+.vt-btn.sel{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 16px rgba(79,70,229,.32)}
+.vt-cnt{font-size:.68rem;font-weight:700;background:rgba(148,163,184,.16);padding:1px 9px;border-radius:10px;color:inherit}
+.vt-btn.sel .vt-cnt{background:rgba(255,255,255,.22)}
 
 /* Section header */
 .sec-hd{font-family:var(--font-serif);font-size:.92rem;font-weight:700;color:var(--ink);margin:18px 4px 9px;padding-bottom:7px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
