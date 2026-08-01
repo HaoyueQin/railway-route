@@ -193,9 +193,11 @@ class WebCssContractTest(unittest.TestCase):
 
     def test_cdd_panel_is_glass_not_opaque_white(self):
         # 步骤2 契约：下拉面板使用半透明玻璃背景，不再依赖原生白色渲染
+        # （令牌化后 background 引用 var(--glass-4)，其值在 :root 为半透明白）
         panel_block = self.css.split(".cdd-panel{")[1].split("}")[0]
-        self.assertIn("rgba(", panel_block)
+        self.assertIn("var(--glass-4)", panel_block)
         self.assertIn("backdrop-filter", panel_block)
+        self.assertIn("--glass-4:rgba(255,255,255,.97)", self.css)
 
     def test_z_top_escape_stack_context(self):
         # 回归防护：backdrop-filter 卡片会困住绝对定位下拉面板，
@@ -237,12 +239,20 @@ class WebJsContractTest(unittest.TestCase):
         self.assertIn("city: \"\"", self.js)
 
     def test_sort_options_cover_six_dimensions(self):
+        # 文案已迁入 i18n.js 字典（app.js 用 t("sf.xxx") 引用）
+        i18n_js = (WEB_DIR / "i18n.js").read_text(encoding="utf-8")
         for label in ["综合评分", "总耗时", "总里程", "出发时间", "到达时间", "换乘次数"]:
-            self.assertIn(label, self.js)
+            self.assertIn(label, i18n_js)
+        # app.js 仍引用对应字典键（防止文案改名后链接断裂）
+        for key in ["sf.score", "sf.time", "sf.dist", "sf.dep", "sf.arr", "sf.xfer"]:
+            self.assertIn(key, self.js)
 
     def test_xfer_filter_options(self):
+        i18n_js = (WEB_DIR / "i18n.js").read_text(encoding="utf-8")
         for label in ["仅直达", "仅同站换乘", "含异站换乘"]:
-            self.assertIn(label, self.js)
+            self.assertIn(label, i18n_js)
+        for key in ["sf.onlyDirect", "sf.onlySame", "sf.onlyInter"]:
+            self.assertIn(key, self.js)
 
     def test_no_settimeout_dropdown_wrapping(self):
         # 步骤2 契约：不再依赖 setTimeout 延迟包装原生 select / 下拉开合
@@ -281,6 +291,12 @@ class WebStaticServingTest(unittest.TestCase):
         self.assertIn(b"HTTP/1.0 200 OK", resp)
         self.assertIn(b"application/javascript", resp)
         self.assertIn(b"buildRouteFlow", resp)
+
+    def test_i18n_js_served(self):
+        resp = http_get("/i18n.js")
+        self.assertIn(b"HTTP/1.0 200 OK", resp)
+        self.assertIn(b"application/javascript", resp)
+        self.assertIn(b"I18N", resp)
 
     def test_unknown_path_404(self):
         resp = http_get("/nope.js")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-铁路出行路径规划 — 多源/多目标 CSA + 类型化路径段 + Web GUI + 参数校验。
+railway-route — 铁路出行路径规划（Python 版）
+多源/多目标 CSA + 类型化路径段 + Web GUI + 参数校验。
 
 用法:
   python src/main.py 北京 广州 --match-mode fuzzy
@@ -27,6 +28,10 @@ from src.validation import (
     RequestValidationError,
     build_search_request,
 )
+from src.updater import cmp_version, download, fetch_latest
+
+# 应用版本（更新检查对比用；发布时随版本递增，GitHub Release tag 用 v{APP_VERSION}）
+APP_VERSION = "1.0.0"
 
 
 # ═══════════════════════════════════════════════════════
@@ -120,7 +125,7 @@ def _base_dir() -> pathlib.Path:
 def _log_error(msg: str):
     """windowed 打包后控制台不可见：异常写入本地日志便于排查。"""
     try:
-        log_dir = pathlib.Path(os.environ.get("LOCALAPPDATA", pathlib.Path.home())) / "铁路出行路径规划"
+        log_dir = pathlib.Path(os.environ.get("LOCALAPPDATA", pathlib.Path.home())) / "railway-route"
         log_dir.mkdir(parents=True, exist_ok=True)
         with open(log_dir / "app.log", "a", encoding="utf-8") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
@@ -138,7 +143,7 @@ def _install_excepthook():
         msg = "".join(traceback.format_exception(tp, val, tb))
         _log_error(msg)
         print(msg, file=sys.stderr)
-        print(f"启动失败，日志已写入 %LOCALAPPDATA%\\铁路出行路径规划\\app.log", file=sys.stderr)
+        print(f"启动失败，日志已写入 %LOCALAPPDATA%\\railway-route\\app.log", file=sys.stderr)
 
     sys.excepthook = hook
 
@@ -162,7 +167,7 @@ class APIHandler(BaseHTTPRequestHandler):
         p = urlparse(self.path)
         if p.path == "/":
             self._serve_static("index.html")
-        elif p.path in ("/styles.css", "/app.js"):
+        elif p.path in ("/styles.css", "/app.js", "/i18n.js"):
             self._serve_static(p.path.lstrip("/"))
         elif p.path == "/api/match":
             self._match(parse_qs(p.query))
@@ -170,6 +175,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._search(parse_qs(p.query))
         elif p.path == "/api/train":
             self._train(parse_qs(p.query))
+        elif p.path == "/api/appinfo":
+            self._json({"name": "railway-route", "version": APP_VERSION})
         else:
             self.send_response(404)
             self.end_headers()
@@ -369,6 +376,55 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
                 webview.windows[0].destroy()
             except Exception:
                 pass
+
+        # ── 检查更新（GitHub Releases API；proxy_port 空 = 系统代理）──
+        def check_update(self, proxy_port=""):
+            """返回 {status, current, latest, notes, url} / {status:no-release} / {status:err, message}"""
+            info = fetch_latest(proxy_port.strip() or None)
+            if info["status"] != "ok":
+                return info
+            if cmp_version(APP_VERSION, info["latest"]) < 0:
+                return {"status": "ok", "current": APP_VERSION, "latest": info["latest"],
+                        "notes": info["notes"], "url": info["url"]}
+            return {"status": "ok", "current": APP_VERSION, "latest": None}
+
+        def download_update(self, proxy_port=""):
+            """后台线程下载安装包；进度经 get_download_progress 轮询。
+
+            下载完成后自动启动 NSIS 安装器（静默更新模式，装完自动重启应用）。
+            """
+            if getattr(self, "_dl", None) and self._dl["state"] == "downloading":
+                return {"error": "already downloading"}
+            self._dl = {"state": "downloading", "downloaded": 0, "total": 0, "message": ""}
+            proxy = proxy_port.strip() or None
+
+            def worker():
+                info = fetch_latest(proxy)
+                if info["status"] != "ok" or not info.get("url"):
+                    self._dl.update({"state": "err", "message": info.get("message") or "无可用安装包"})
+                    return
+
+                def prog(got, total):
+                    self._dl.update({"downloaded": got, "total": total})
+
+                d = download(info["url"], on_progress=prog, proxy_port=proxy)
+                if d["status"] != "ok":
+                    self._dl.update({"state": "err", "message": d["message"]})
+                    return
+                self._dl.update({"state": "done", "path": d["path"]})
+                # 启动安装器：静默 + 更新模式（不弹向导，装完自动重启应用）
+                try:
+                    import subprocess
+                    subprocess.Popen(["cmd", "/c", "start", "", d["path"]])
+                except Exception as e:
+                    self._dl.update({"state": "err", "message": f"启动安装程序失败: {e}"})
+
+            import threading
+            threading.Thread(target=worker, daemon=True).start()
+            return {"started": True}
+
+        def get_download_progress(self):
+            return getattr(self, "_dl", {"state": "idle", "downloaded": 0, "total": 0})
 
     try:
         webview.create_window(

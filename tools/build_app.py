@@ -1,6 +1,6 @@
 """打包桌面应用：PyInstaller onefile + 自定义应用图标。
 
-产物: dist/铁路出行路径规划.exe（双击即启动桌面应用，自带图标）
+产物: dist/railway-route.exe（双击即启动桌面应用，自带图标）
 
 用法: python tools/build_app.py
 """
@@ -20,8 +20,8 @@ def main():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean", "--onefile",
-        "--noconsole",  # windowed：双击不弹命令行窗口（错误写 %LOCALAPPDATA%\铁路出行路径规划\app.log）
-        "--name", "铁路出行路径规划",
+        "--noconsole",  # windowed：双击不弹命令行窗口（错误写 %LOCALAPPDATA%\railway-route\app.log）
+        "--name", "railway-route",
         "--icon", str(ICON),
         # 前端与数据随包分发（frozen 时 _base_dir() 指向解压目录）
         "--add-data", f"web{SEP}web",
@@ -34,7 +34,7 @@ def main():
     ]
     print("打包中（PyInstaller onefile）...")
     subprocess.run(cmd, cwd=ROOT, check=True)
-    print(f"\n完成: {ROOT / 'dist' / '铁路出行路径规划.exe'}")
+    print(f"\n完成: {ROOT / 'dist' / 'railway-route.exe'}")
 
 
 if __name__ == "__main__":

@@ -3,8 +3,9 @@
    ═══════════════════════════════════════════════════════ */
 "use strict";
 
-// ── 状态 ──
-const _form = { matchMode: "fuzzy", profile: "balanced", fromMode: null, toMode: null };
+// ── 状态（默认值取自设置；用户可在表单/设置面板中临时或持久调整）──
+const _settings0 = loadSettings();
+const _form = { matchMode: _settings0.matchMode, profile: _settings0.profile, fromMode: null, toMode: null };
 // fromMode/toMode：null=跟随全局匹配模式；"fuzzy"/"exact"=该端独立选择
 const _sf = { sort: "score", xfer: "all", city: "", view: "direct" }; // 排序筛选状态 + 直达/换乘视图
 const _trainCache = new Map();                              // 车次全程时刻表缓存
@@ -133,7 +134,7 @@ function initAppMode() {
       const maxed = await window.pywebview.api.toggle_maximize();
       if (maxed === null) return;
       maxBtn.classList.toggle("maxed", !!maxed);
-      maxBtn.title = maxed ? "还原" : "最大化";
+      maxBtn.title = maxed ? t("tb.restore") : t("tb.max");
     } catch (e) {}
   };
   if (maxBtn) maxBtn.addEventListener("click", toggleMax);
@@ -194,8 +195,11 @@ if (new URLSearchParams(location.search).has("app")) initAppMode();
 const ITEM_H = 26;
 const RULE_TOP = 52;   // 选中行顶部距可视区顶部（= (130 - 26) / 2，选中数字居中）
 const WHEEL_ITEMS = { h: 24, m: 60 };   // 小时 0-23 / 分钟 0-59
-const _wheelState = { same: { h: 0, m: 15 }, inter: { h: 1, m: 0 } };
-_form.sameMin = 15; _form.interMin = 60;
+const _wheelState = {
+  same: { h: Math.floor((_settings0.sameTransfer || 15) / 60), m: (_settings0.sameTransfer || 15) % 60 },
+  inter: { h: Math.floor((_settings0.interTransfer || 60) / 60), m: (_settings0.interTransfer || 60) % 60 },
+};
+_form.sameMin = _settings0.sameTransfer || 15; _form.interMin = _settings0.interTransfer || 60;
 // 时间约束（4 个字段：null = 全天不限）
 _form.times = { depAfter: null, depBefore: null, arrAfter: null, arrBefore: null };
 
@@ -325,10 +329,10 @@ function initWheel(rowId, key, onChange) {
     if (onChange) onChange(h, m);
   };
   const hW = createWheel(row, "h", _wheelState[key].h, v => onSel(v, _wheelState[key].m));
-  const unitH = document.createElement("span"); unitH.className = "wheel-unit"; unitH.textContent = "时";
+  const unitH = document.createElement("span"); unitH.className = "wheel-unit"; unitH.textContent = t("wheel.h");
   const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
   const mW = createWheel(row, "m", _wheelState[key].m, v => onSel(_wheelState[key].h, v));
-  const unitM = document.createElement("span"); unitM.className = "wheel-unit"; unitM.textContent = "分";
+  const unitM = document.createElement("span"); unitM.className = "wheel-unit"; unitM.textContent = t("wheel.m");
   row.appendChild(unitH); row.appendChild(colon); row.appendChild(unitM);
   void hW; void mW;
 }
@@ -412,9 +416,9 @@ $id("to").addEventListener("input", () => suggest("to"));
 function setEndMode(key, mode) {
   _form[key] = mode;
   const btn = $id(key.replace("Mode", "-mode"));
-  btn.textContent = mode === "exact" ? "本站" : "全部站";
+  btn.textContent = mode === "exact" ? t("search.this") : t("search.all");
   btn.classList.toggle("on", mode === "exact");
-  btn.title = mode === "exact" ? "当前：仅本站（点击切回该端全部站）" : "当前：该端全部站（点击仅本站）";
+  btn.title = mode === "exact" ? t("search.modeThis") : t("search.modeAll");
 }
 $id("from-mode").addEventListener("click", () => setEndMode("fromMode", _form.fromMode === "exact" ? "fuzzy" : "exact"));
 $id("to-mode").addEventListener("click", () => setEndMode("toMode", _form.toMode === "exact" ? "fuzzy" : "exact"));
@@ -440,12 +444,12 @@ async function search() {
   p.set("max_transfers", $id("max-num").value);
   const xf = $id("xfer-at").value.trim();
   if (xf) p.set("xfer_at", xf);
-  $id("results").innerHTML = '<div class="empty search-loading"><span class="spinner" aria-hidden="true"></span>搜索中…</div>';
+  $id("results").innerHTML = '<div class="empty search-loading"><span class="spinner" aria-hidden="true"></span>' + t("search.loading") + "</div>";
   let d;
   try {
     d = await fetch("/api/search?" + p.toString()).then(r => r.json());
   } catch (e) {
-    $id("results").innerHTML = '<div class="empty">网络错误，请确认服务已启动</div>';
+    $id("results").innerHTML = '<div class="empty">' + t("search.netErr") + "</div>";
     return;
   }
   if (d.error) {
@@ -474,44 +478,44 @@ function render() {
   }
 
   let h = '<div class="meta">'
-    + "<span>" + d.routes.length + " 个方案（直达 " + direct.length + " · 换乘 " + xfer.length + "）</span>"
-    + "<span>" + d.time + "s · 扫描 " + d.scanned + " 条</span>"
-    + (d.cached ? '<span class="mtag-hit">' + icon("bolt") + ' 缓存命中</span>' : "")
-    + (d.complete ? "" : '<span class="mtag">' + icon("alert") + ' 搜索未完整</span>')
+    + "<span>" + t("meta.plans", { n: d.routes.length, d: direct.length, x: xfer.length }) + "</span>"
+    + "<span>" + t("meta.time", { t: d.time, n: d.scanned }) + "</span>"
+    + (d.cached ? '<span class="mtag-hit">' + icon("bolt") + " " + t("meta.cached") + "</span>" : "")
+    + (d.complete ? "" : '<span class="mtag">' + icon("alert") + " " + t("meta.incomplete") + "</span>")
     + "</div>";
 
   // 直达 / 换乘 视图切换（左右两个按钮，居中）
   h += '<div class="view-tabs">'
     + '<button type="button" class="vt-btn' + (_sf.view === "direct" ? " sel" : "") + '" data-view="direct">'
-    + icon("direct") + '直达方案 <span class="vt-cnt">' + direct.length + "</span></button>"
+    + icon("direct") + t("view.direct") + ' <span class="vt-cnt">' + direct.length + "</span></button>"
     + '<button type="button" class="vt-btn' + (_sf.view === "xfer" ? " sel" : "") + '" data-view="xfer">'
-    + icon("repeat") + '换乘方案 <span class="vt-cnt">' + xfer.length + "</span></button>"
+    + icon("repeat") + t("view.xfer") + ' <span class="vt-cnt">' + xfer.length + "</span></button>"
     + "</div>";
 
   h += '<div class="sf-bar" id="sf-bar">'
-    + '<label>排序</label><span id="sf-sort-c"></span>'
-    + '<label>筛选</label><span id="sf-xfer-c"></span>'
-    + '<input id="sf-city" placeholder="换乘城市/站名">'
-    + '<button class="sf-clear" id="sf-clear" type="button">重置</button>'
-    + '</div>'
+    + "<label>" + t("sf.sort") + "</label><span id=\"sf-sort-c\"></span>"
+    + "<label>" + t("sf.filter") + "</label><span id=\"sf-xfer-c\"></span>"
+    + '<input id="sf-city" placeholder="' + t("sf.cityPh") + '">'
+    + '<button class="sf-clear" id="sf-clear" type="button">' + t("sf.reset") + "</button>"
+    + "</div>"
     + '<div id="route-list"></div>';
 
   $id("results").innerHTML = h;
 
   buildDropdown($id("sf-sort-c"), [
-    { value: "score", label: "综合评分" },
-    { value: "time", label: "总耗时" },
-    { value: "dist", label: "总里程" },
-    { value: "dep", label: "出发时间" },
-    { value: "arr", label: "到达时间" },
-    { value: "xfer", label: "换乘次数" },
+    { value: "score", label: t("sf.score") },
+    { value: "time", label: t("sf.time") },
+    { value: "dist", label: t("sf.dist") },
+    { value: "dep", label: t("sf.dep") },
+    { value: "arr", label: t("sf.arr") },
+    { value: "xfer", label: t("sf.xfer") },
   ], _sf.sort, v => { _sf.sort = v; renderList(); });
 
   buildDropdown($id("sf-xfer-c"), [
-    { value: "all", label: "全部" },
-    { value: "direct", label: "仅直达" },
-    { value: "same", label: "仅同站换乘" },
-    { value: "inter", label: "含异站换乘" },
+    { value: "all", label: t("sf.all") },
+    { value: "direct", label: t("sf.onlyDirect") },
+    { value: "same", label: t("sf.onlySame") },
+    { value: "inter", label: t("sf.onlyInter") },
   ], _sf.xfer, v => { _sf.xfer = v; renderList(); });
 
   $id("sf-city").value = _sf.city;
@@ -532,7 +536,7 @@ function render() {
       const holder = more.closest(".tt-card");
       if (holder) {
         holder.classList.toggle("full");
-        more.textContent = holder.classList.contains("full") ? "▴ 收起完整时刻表" : "▾ 查看完整时刻表";
+        more.textContent = holder.classList.contains("full") ? t("tt.collapse") : t("tt.expand");
       }
       return;
     }
@@ -570,12 +574,12 @@ function renderList() {
     (a.train_transfers + a.interstation_transfers) - (b.train_transfers + b.interstation_transfers));
 
   if (!routes.length) {
-    list.innerHTML = '<div class="empty">' + icon("inbox") + ' 当前视图下无匹配方案</div>';
+    list.innerHTML = '<div class="empty">' + icon("inbox") + " " + t("empty.noMatch") + "</div>";
     return;
   }
 
-  const label = view === "direct" ? "直达方案" : "换乘方案";
-  list.innerHTML = renderGroup(routes, label, 0, routes.length);
+  const label = view === "direct" ? t("view.direct") : t("view.xfer");
+  list.innerHTML = renderGroup(routes, label, view === "direct", 0, routes.length);
   // 完全展开：卡片默认展开，时刻表懒加载
   list.querySelectorAll(".rc").forEach(card => {
     card.classList.add("expanded");
@@ -584,25 +588,25 @@ function renderList() {
 }
 
 // ── 路线卡片分组（含入场动效 stagger）──
-function renderGroup(routes, label, startIdx, totalInGroup) {
+function renderGroup(routes, label, isDirect, startIdx, totalInGroup) {
   if (!routes.length) return "";
-  const grpIcon = label.includes("直达") ? icon("direct") : icon("repeat");
-  let g = '<div class="sec-hd">' + grpIcon + label + '<span class="cnt">' + totalInGroup + " 条</span></div>";
+  const grpIcon = isDirect ? icon("direct") : icon("repeat");
+  let g = '<div class="sec-hd">' + grpIcon + label + '<span class="cnt">' + t("rc.group", { n: totalInGroup }) + "</span></div>";
   routes.forEach((r, i) => {
     const numCls = r.score >= 0.6 ? "n-good" : r.score >= 0.35 ? "n-mid" : "n-bad";
     const trainSegs = r.segments.filter(s => s.type === "train");
     const firstDep = trainSegs.length ? td(trainSegs[0].depart) : td(r.first_departure);
     const lastArr = trainSegs.length ? td(trainSegs[trainSegs.length - 1].arrive) : td(r.final_arrival);
     let xferText = "";
-    if (r.train_transfers > 0) xferText += '<span class="badge bC">换乘 ' + r.train_transfers + " 次</span> ";
-    if (r.interstation_transfers > 0) xferText += '<span class="badge bI">地面 ' + r.interstation_transfers + " 次</span> ";
+    if (r.train_transfers > 0) xferText += '<span class="badge bC">' + t("rc.transferN", { n: r.train_transfers }) + "</span> ";
+    if (r.interstation_transfers > 0) xferText += '<span class="badge bI">' + t("rc.groundN", { n: r.interstation_transfers }) + "</span> ";
 
     // 贴生活：乘坐时长 + 等待时长（换乘时展示，等待 = 总耗时 - 行驶 - 地面）
     const travelMin = trainSegs.reduce((a, s) => a + (s.travel_minutes || 0), 0);
     const groundMin = r.interstation_minutes || 0;
     const waitMin = r.total_minutes - travelMin - groundMin;
     let waitText = "";
-    if (waitMin > 0) waitText = '<span class="rc-wait">' + icon("wait") + ' 等 ' + fm(waitMin) + "</span>";
+    if (waitMin > 0) waitText = '<span class="rc-wait">' + icon("wait") + " " + t("rc.wait", { t: fm(waitMin) }) + "</span>";
 
     // 入场动效：前 12 张卡片错峰淡入（transform/opacity → GPU 合成）
     const delay = Math.min(i, 11) * 45;
@@ -612,9 +616,9 @@ function renderGroup(routes, label, startIdx, totalInGroup) {
       + '<div class="rc-top"><span class="rc-route">' + esc(r.actual_origin) + " → " + esc(r.actual_destination)
       + '</span><span class="rc-time">' + esc(firstDep) + " → " + esc(lastArr) + "</span></div>"
       + '<div class="rc-flow">' + buildRouteFlow(r) + "</div>"
-      + '<div class="rc-info"><span class="rc-stat">' + icon("clock") + ' ' + fm(r.total_minutes) + "</span>"
-      + '<span class="rc-stat">' + icon("route") + ' ' + r.rail_distance + "km</span>"
-      + '<span class="rc-stat">' + icon("train") + ' 乘 ' + fm(travelMin) + "</span>" + waitText + xferText + "</div>"
+      + '<div class="rc-info"><span class="rc-stat">' + icon("clock") + " " + fm(r.total_minutes) + "</span>"
+      + '<span class="rc-stat">' + icon("route") + " " + r.rail_distance + "km</span>"
+      + '<span class="rc-stat">' + icon("train") + " " + t("rc.ride", { t: fm(travelMin) }) + "</span>" + waitText + xferText + "</div>"
       + "</div></div>"
       + '<div class="rc-detail"><div class="rc-detail-inner"><div class="tt-wrap">'
       + buildTimetableSkeleton(r)
@@ -650,14 +654,14 @@ function buildRouteFlow(r) {
     const next = ev[i + 1];
     if (e.arr !== undefined && next && next.station === e.station && next.dep !== undefined) {
       h += '<div class="rc-node"><span class="rc-node-name">' + esc(e.station)
-        + '</span><span class="rc-node-time">' + esc(e.arr) + "到 · " + esc(next.dep) + "发</span></div>";
+        + '</span><span class="rc-node-time">' + esc(e.arr) + t("rc.arrive") + " · " + esc(next.dep) + t("rc.depart") + "</span></div>";
       i++;
     } else if (e.dep !== undefined) {
       h += '<div class="rc-node"><span class="rc-node-name">' + esc(e.station)
-        + '</span><span class="rc-node-time">' + esc(e.dep) + "发</span></div>";
+        + '</span><span class="rc-node-time">' + esc(e.dep) + t("rc.depart") + "</span></div>";
     } else if (e.arr !== undefined) {
       h += '<div class="rc-node"><span class="rc-node-name">' + esc(e.station)
-        + '</span><span class="rc-node-time">' + esc(e.arr) + "到</span></div>";
+        + '</span><span class="rc-node-time">' + esc(e.arr) + t("rc.arrive") + "</span></div>";
     }
   }
   return h;
@@ -674,10 +678,10 @@ function buildTimetableSkeleton(r) {
         + '<span class="tt-seg">' + esc(s.from_station) + " → " + esc(s.to_station) + " · " + fm(s.travel_minutes) + " · " + s.distance + "km</span>"
         + '<span class="tt-route"></span>'
         + "</div>"
-        + '<div class="tt-body"><div class="tt-load"><span class="spinner" aria-hidden="true"></span>加载时刻表…</div></div>'
+        + '<div class="tt-body"><div class="tt-load"><span class="spinner" aria-hidden="true"></span>' + t("tt.loading") + "</div></div>"
         + "</div>";
     } else {
-      h += '<div class="tt-gnd">' + icon("walk") + ' 地面换乘 ' + esc(s.from_station) + " → " + esc(s.to_station)
+      h += '<div class="tt-gnd">' + icon("walk") + " " + t("tt.ground") + " " + esc(s.from_station) + " → " + esc(s.to_station)
         + " · " + s.transfer_minutes + "min · " + esc(s.city_name || "") + "</div>";
     }
   });
@@ -701,11 +705,11 @@ function fillTimetable(card, data, fromName, toName) {
   const stops = (data && data.stops) || [];
   const hd = card.querySelector(".tt-route");
   if (stops.length) {
-    hd.innerHTML = '始发 <b>' + esc(stops[0].station) + "</b> · 终到 <b>" + esc(stops[stops.length - 1].station) + "</b>";
+    hd.innerHTML = t("tt.od", { o: esc(stops[0].station), d: esc(stops[stops.length - 1].station) });
   }
   const body = card.querySelector(".tt-body");
   if (!stops.length) {
-    body.innerHTML = '<div class="tt-load">暂无时刻表数据</div>';
+    body.innerHTML = '<div class="tt-load">' + t("tt.none") + "</div>";
     return;
   }
   const fromIdx = stops.findIndex(s => s.station === fromName);
@@ -721,10 +725,10 @@ function fillTimetable(card, data, fromName, toName) {
     rowHtml(s, i + startIdx === fromIdx ? "hl-from" : i + startIdx === toIdx ? "hl-to" : ""));
   // 完整时刻表（折叠）
   const fullRows = stops.map((s, i) => rowHtml(s, i === fromIdx ? "hl-from" : i === toIdx ? "hl-to" : ""));
-  let h = '<table class="tt-tbl"><tr><th>站名</th><th>到达</th><th>发车</th><th>停时</th></tr>' + segRows.join("") + "</table>";
+  let h = '<table class="tt-tbl"><tr><th>' + t("tt.thStation") + "</th><th>" + t("tt.thArrive") + "</th><th>" + t("tt.thDepart") + "</th><th>" + t("tt.thStay") + "</th></tr>" + segRows.join("") + "</table>";
   if (stops.length > endIdx - startIdx + 1) {
-    h += '<button class="tt-more" type="button">▾ 查看完整 ' + stops.length + " 站时刻表</button>"
-      + '<div class="tt-full"><table class="tt-tbl"><tr><th>站名</th><th>到达</th><th>发车</th><th>停时</th></tr>'
+    h += '<button class="tt-more" type="button">' + t("tt.expandN", { n: stops.length }) + "</button>"
+      + '<div class="tt-full"><table class="tt-tbl"><tr><th>' + t("tt.thStation") + "</th><th>" + t("tt.thArrive") + "</th><th>" + t("tt.thDepart") + "</th><th>" + t("tt.thStay") + "</th></tr>"
       + fullRows.join("") + "</table></div>";
   }
   body.innerHTML = h;
@@ -778,6 +782,275 @@ $id("btn-swap").addEventListener("click", () => {
 });
 
 /* ═══════════════════════════════════════════════════════
+   设置面板（i18n.js 提供 loadSettings/saveSettings/t/applyLang/applyTheme）
+   ═══════════════════════════════════════════════════════ */
+let _appVersion = "0.0.0";
+
+async function initAppVersion() {
+  try {
+    const d = await fetch("/api/appinfo").then(r => r.json());
+    if (d && d.version) _appVersion = d.version;
+  } catch (e) {}
+  syncSettingsUI();
+}
+
+function clampInt(v, lo, hi, dft) {
+  const n = parseInt(v, 10);
+  if (Number.isNaN(n)) return dft;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function segVal(sel) {
+  const selBtn = sel.querySelector(".seg-btn.sel");
+  return selBtn ? selBtn.dataset.v : null;
+}
+
+function selSeg(sel, v) {
+  sel.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("sel", b.dataset.v === v));
+}
+
+function openSettings() { $id("set-mask").hidden = false; syncSettingsUI(); }
+function closeSettings() { $id("set-mask").hidden = true; }
+
+function syncSettingsUI() {
+  const s = loadSettings();
+  selSeg($id("set-lang"), s.lang);
+  selSeg($id("set-theme"), s.theme);
+  selSeg($id("set-profile"), s.profile);
+  selSeg($id("set-match"), s.matchMode);
+  $id("set-same").value = s.sameTransfer;
+  $id("set-inter").value = s.interTransfer;
+  $id("set-max").value = s.maxTransfers;
+  $id("set-autocheck").checked = !!s.autoCheckUpdate;
+  $id("set-proxy").value = s.proxyPort || "";
+  $id("set-ver").textContent = t("set.curVer", { v: _appVersion });
+  $id("set-saved").hidden = true;
+}
+
+function collectSettings() {
+  return {
+    lang: segVal($id("set-lang")) || "zh",
+    theme: segVal($id("set-theme")) || "light",
+    profile: segVal($id("set-profile")) || "balanced",
+    matchMode: segVal($id("set-match")) || "fuzzy",
+    sameTransfer: clampInt($id("set-same").value, 0, 180, 15),
+    interTransfer: clampInt($id("set-inter").value, 0, 600, 60),
+    maxTransfers: clampInt($id("set-max").value, 0, 10, 3),
+    autoCheckUpdate: $id("set-autocheck").checked,
+    proxyPort: $id("set-proxy").value.trim(),
+  };
+}
+
+function saveFromPanel() {
+  saveSettings(collectSettings());
+  applyLang();
+  applyTheme();
+  const s = loadSettings();
+  // 表单默认值联动（不改动当前已调整的表单值，仅同步全局匹配模式按钮态）
+  if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
+  if (_form.toMode) setEndMode("toMode", _form.toMode);
+  if (s.maxTransfers !== undefined) { $id("max-num").value = s.maxTransfers; $id("max-rng").value = s.maxTransfers; }
+  const sv = $id("set-saved");
+  sv.hidden = false;
+  clearTimeout(sv._t);
+  sv._t = setTimeout(() => { sv.hidden = true; }, 1800);
+}
+
+// 标题栏 + 导航栏的语言快捷切换按钮
+document.querySelectorAll("[data-lang-toggle]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const next = loadSettings().lang === "zh" ? "en" : "zh";
+    saveSettings({ lang: next });
+    applyLang();
+    if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
+    if (_form.toMode) setEndMode("toMode", _form.toMode);
+    initWheel("same-wheel", "same");
+    initWheel("inter-wheel", "inter");
+    if (_routesData) render();
+  });
+});
+
+// 设置入口（标题栏齿轮 + 导航栏齿轮）
+document.querySelectorAll("#tb-settings, #nv-settings").forEach(btn => {
+  btn.addEventListener("click", openSettings);
+});
+$id("set-close").addEventListener("click", closeSettings);
+$id("set-mask").addEventListener("click", e => { if (e.target === $id("set-mask")) closeSettings(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSettings(); });
+
+// 语言 / 主题 / 搜索默认值控件：改动即保存生效
+function bindSegSave(sel, key) {
+  sel.addEventListener("click", e => {
+    const b = e.target.closest(".seg-btn");
+    if (!b) return;
+    selSeg(sel, b.dataset.v);
+    saveFromPanel();
+  });
+}
+bindSegSave($id("set-lang"), "lang");
+bindSegSave($id("set-theme"), "theme");
+bindSegSave($id("set-profile"), "profile");
+bindSegSave($id("set-match"), "matchMode");
+["set-same", "set-inter", "set-max"].forEach(id => {
+  $id(id).addEventListener("change", saveFromPanel);
+});
+$id("set-autocheck").addEventListener("change", saveFromPanel);
+$id("set-proxy").addEventListener("change", saveFromPanel);
+
+// 恢复默认
+$id("set-reset").addEventListener("click", () => {
+  saveSettings({ ...SETTINGS_DEFAULTS });
+  applyLang();
+  applyTheme();
+  syncSettingsUI();
+  saveFromPanel();
+});
+
+/* ═══════════════════════════════════════════════════════
+   检查更新（桌面模式经 JS 桥；浏览器模式提示不可用）
+   ═══════════════════════════════════════════════════════ */
+const _updateUI = {
+  msgEl: null, notesEl: null, barEl: null, txtEl: null, dlBtn: null,
+};
+
+function hasUpdateBridge() {
+  return !!(window.pywebview && window.pywebview.api && window.pywebview.api.check_update)
+    || !!(window.__TAURI__ && window.__TAURI__.core);
+}
+
+function setUpdateMsg(text, cls) {
+  _updateUI.msgEl.textContent = text;
+  _updateUI.msgEl.className = "set-upd-msg" + (cls ? " " + cls : "");
+}
+
+async function doCheckUpdate() {
+  const s = loadSettings();
+  const btn = $id("set-check");
+  btn.disabled = true;
+  setUpdateMsg("");
+  _updateUI.notesEl.innerHTML = "";
+  _updateUI.dlBtn.hidden = true;
+  try {
+    let r;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.check_update) {
+      r = await window.pywebview.api.check_update(s.proxyPort);
+    } else if (window.__TAURI__ && window.__TAURI__.core) {
+      r = await window.__TAURI__.core.invoke("check_update", { proxyPort: s.proxyPort });
+    } else {
+      setUpdateMsg(t("set.checkErr", { e: "browser mode" }), "err");
+      return;
+    }
+    if (r.status === "ok" && r.latest) {
+      setUpdateMsg(t("set.newVer", { v: r.latest }), "new");
+      if (r.notes) _updateUI.notesEl.innerHTML = "<pre>" + esc(r.notes) + "</pre>";
+      _updateUI.dlBtn.hidden = false;
+    } else if (r.status === "ok") {
+      setUpdateMsg(t("set.latest"), "ok");
+    } else if (r.status === "no-release") {
+      setUpdateMsg(t("set.noRelease"), "ok");
+    } else {
+      setUpdateMsg(t("set.checkErr", { e: r.message || "unknown" }), "err");
+    }
+  } catch (e) {
+    setUpdateMsg(t("set.checkErr", { e: String(e && e.message || e) }), "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doDownload() {
+  const s = loadSettings();
+  const dl = () => {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.download_update) {
+      return window.pywebview.api.download_update(s.proxyPort);
+    }
+    if (window.__TAURI__ && window.__TAURI__.core) {
+      return window.__TAURI__.core.invoke("download_update", { proxyPort: s.proxyPort });
+    }
+    return Promise.reject(new Error("no bridge"));
+  };
+  _updateUI.dlBtn.hidden = true;
+  _updateUI.barEl.hidden = false;
+  const poll = async () => {
+    for (let i = 0; i < 1200; i++) {           // 最长约 30 分钟
+      await new Promise(r => setTimeout(r, 1500));
+      let p = { state: "err", message: "lost" };
+      try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.get_download_progress) {
+          p = await window.pywebview.api.get_download_progress();
+        } else if (window.__TAURI__ && window.__TAURI__.core) {
+          p = await window.__TAURI__.core.invoke("get_download_progress");
+        }
+      } catch (e) { p = { state: "err", message: String(e) }; }
+      if (p.state === "done") {
+        _updateUI.barEl.hidden = true;
+        setUpdateMsg(t("set.downloadDone"), "ok");
+        return;
+      }
+      if (p.state === "err") {
+        _updateUI.barEl.hidden = true;
+        setUpdateMsg(t("set.dlErr", { e: p.message || "unknown" }), "err");
+        return;
+      }
+      const pct = Math.round((p.downloaded || 0) * 100 / Math.max(1, p.total || 1));
+      _updateUI.barEl.querySelector("#set-progress-bar").style.width = pct + "%";
+      _updateUI.txtEl.textContent = t("set.downloading", { p: pct });
+    }
+  };
+  try {
+    const r = await dl();
+    if (r && r.error) { _updateUI.barEl.hidden = true; setUpdateMsg(t("set.dlErr", { e: r.error }), "err"); return; }
+    poll();
+  } catch (e) {
+    _updateUI.barEl.hidden = true;
+    setUpdateMsg(t("set.dlErr", { e: String(e && e.message || e) }), "err");
+  }
+}
+
+function initUpdateUI() {
+  _updateUI.msgEl = $id("set-upd-msg");
+  _updateUI.notesEl = $id("set-upd-notes");
+  _updateUI.barEl = $id("set-progress");
+  _updateUI.txtEl = $id("set-progress-txt");
+  _updateUI.barEl.querySelector("#set-progress-bar"); // 校验存在
+  const dl = document.createElement("button");
+  dl.type = "button";
+  dl.className = "bt bt-sm";
+  dl.textContent = t("set.download");
+  dl.hidden = true;
+  dl.addEventListener("click", doDownload);
+  _updateUI.dlBtn = dl;
+  $id("set-upd-msg").after(dl);
+  $id("set-check").addEventListener("click", doCheckUpdate);
+  if (!hasUpdateBridge()) {
+    $id("set-check").disabled = true;
+    $id("set-check").title = "Web browser mode: update check requires the desktop app";
+  }
+  // 启动时自动检查（桌面模式 + 设置开启）
+  const s = loadSettings();
+  if (s.autoCheckUpdate && hasUpdateBridge()) {
+    setTimeout(() => { try { doCheckUpdate(); } catch (e) {} }, 2500);
+  }
+}
+
+// 语言切换时重建动态文案（滚轮单位/端点按钮/结果区）
+registerLang(() => {
+  initWheel("same-wheel", "same");
+  initWheel("inter-wheel", "inter");
+  if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
+  if (_form.toMode) setEndMode("toMode", _form.toMode);
+  if (_routesData) render();
+  syncSettingsUI();
+});
+
+// 最大换乘默认值来自设置
+$id("max-num").value = loadSettings().maxTransfers;
+$id("max-rng").value = loadSettings().maxTransfers;
+
+initAppVersion();
+initUpdateUI();
+
+/* ═══════════════════════════════════════════════════════
    实时流动背景：Canvas 2D 多色块融合渲染
    思路（调研自开源社区 FluidGradient 等方案）：多层半透明大
    径向渐变"色块"逐帧重新计算位置并叠加，色块交融、自然流动；
@@ -793,10 +1066,18 @@ $id("btn-swap").addEventListener("click", () => {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // 保持原多色配色：indigo/violet · pink/orange · emerald/teal · amber
-  const PALETTE = [
-    [129, 140, 248], [192, 132, 252], [244, 114, 182],
-    [251, 146, 60], [52, 211, 153], [45, 212, 191], [251, 191, 36],
-  ];
+  // 深色主题：降低明度（暗色底上柔和发光）
+  const PALETTES = {
+    light: [
+      [129, 140, 248], [192, 132, 252], [244, 114, 182],
+      [251, 146, 60], [52, 211, 153], [45, 212, 191], [251, 191, 36],
+    ],
+    dark: [
+      [99, 102, 241], [168, 85, 247], [236, 72, 153],
+      [217, 119, 6], [16, 185, 129], [20, 184, 166], [217, 164, 6],
+    ],
+  };
+  let PALETTE = PALETTES[document.documentElement.dataset.theme] || PALETTES.light;
   const rand = (a, b) => a + Math.random() * (b - a);
 
   let W = 0, H = 0, blobs = [];
@@ -847,6 +1128,12 @@ $id("btn-swap").addEventListener("click", () => {
 
   resize();
   spawn();
+  // 主题切换：换色板并重绘（静态一帧或继续动画循环）
+  registerTheme(theme => {
+    PALETTE = PALETTES[theme] || PALETTES.light;
+    spawn();
+    if (reduced) draw(0);
+  });
   addEventListener("resize", () => { resize(); if (reduced) draw(0); });
   if (reduced) { draw(0); return; }                // 减少动效偏好：只渲染静态一帧
   const loop = (ts) => { draw(ts); requestAnimationFrame(loop); };

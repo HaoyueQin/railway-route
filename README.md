@@ -1,4 +1,4 @@
-# 铁路出行路径规划 — railway-route-planner
+# railway-route — 铁路出行路径规划（Python 版）
 
 基于路路通离线时刻表数据的本地铁路出行路径规划器。项目使用自定义多源/多目标 CSA（Connection Scan Algorithm）变体 + 轮次化多标签（RAPTOR 风格），在全国时刻表上生成直达和多次换乘候选，提供 **CLI / 本地 Web GUI / 桌面应用（pywebview）** 三种使用方式。
 
@@ -59,7 +59,7 @@ python src/main.py --app
 # 本地 Web GUI（浏览器）
 python src/main.py --gui --port 8000
 
-# 打包独立 exe（自带图标，产物 dist/铁路出行路径规划.exe）
+# 打包独立 exe（自带图标，产物 dist/railway-route.exe）
 python tools/build_app.py
 
 # CLI 查询
