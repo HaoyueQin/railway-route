@@ -1,6 +1,7 @@
 //! 零依赖手写 HTTP/1.1 服务器（对齐 Python APIHandler 的路由与静态文件服务）。
 //!
-//! 支持 GET /api/search /api/match /api/train + 静态文件（/ /styles.css /app.js）。
+//! 支持 GET /api/search /api/match /api/train /api/appinfo + 静态文件
+//! （/ /styles.css /app.js /i18n.js）。
 //! query 参数 percent-decode（UTF-8）+ 号 → 空格（与 parse_qs 一致）。
 
 use crate::api;
@@ -130,9 +131,18 @@ fn handle_connection(
             let body = payload.to_string().into_bytes();
             (status, "application/json; charset=utf-8".to_string(), body)
         }
+        "/api/appinfo" => {
+            let body = format!(
+                r#"{{"name":"railway-route","version":"{}"}}"#,
+                env!("CARGO_PKG_VERSION")
+            )
+            .into_bytes();
+            (200, "application/json; charset=utf-8".to_string(), body)
+        }
         "/" | "/index.html" => serve_static(web_dir, "index.html"),
         "/styles.css" => serve_static(web_dir, "styles.css"),
         "/app.js" => serve_static(web_dir, "app.js"),
+        "/i18n.js" => serve_static(web_dir, "i18n.js"),
         _ => (404, "text/plain; charset=utf-8".to_string(), b"Not Found".to_vec()),
     };
     send_response(stream, status, &content_type, &body);

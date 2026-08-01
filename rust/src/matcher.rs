@@ -311,17 +311,36 @@ pub fn resolve_station_set(
             .get(&city_code)
             .cloned()
             .unwrap_or_default();
+        // 站名以所属城市名开头（北京南/信阳东/廊坊北）→ 城市前缀扩散
+        // → 所属市全部站（"北京西"→北京全部站；区/县/镇由规则 2/3 先行拦截）
         if !city_name.is_empty() && q.starts_with(&city_name) {
+            if let Some(stations) = matcher.city_to_stations.get(&city_code) {
+                if !stations.is_empty() {
+                    return Ok(stations.clone());
+                }
+            }
             return Ok(vec![q.to_string()]);
+        }
+        // 地名同名站规则：站名去方位后缀后的地名与组内其他站同名
+        // （曲阜东→曲阜、霸州西→霸州）→ 同城扩散（与 fuzzy_match 兜底规则一致）
+        let stations = matcher.city_to_stations.get(&city_code).cloned().unwrap_or_default();
+        let base = match q.chars().last() {
+            Some(c) if "东西南北".contains(c) => {
+                let mut b = q.to_string();
+                b.pop();
+                b
+            }
+            _ => q.to_string(),
+        };
+        if stations.iter().any(|s| s != q && s == &base) {
+            return Ok(stations);
         }
         let n_dep = graph.departures[idx].len();
         if n_dep >= MIN_STATION_TRAINS_FOR_SINGLE {
             return Ok(vec![q.to_string()]);
         }
-        if let Some(stations) = matcher.city_to_stations.get(&city_code) {
-            if !stations.is_empty() {
-                return Ok(stations.clone());
-            }
+        if !stations.is_empty() {
+            return Ok(stations);
         }
         return Ok(vec![q.to_string()]);
     }

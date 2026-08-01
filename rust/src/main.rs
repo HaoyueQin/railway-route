@@ -12,6 +12,7 @@ mod csa;
 mod data;
 mod graph;
 mod http;
+mod updater;
 mod json;
 mod matcher;
 mod models;
@@ -364,6 +365,12 @@ fn run_tauri(csv: &Path, js: &Path, web_dir: &Path) {
     println!("数据加载完成（{n_stations} 站 / {n_trains} 车次），Tauri 窗口 → http://127.0.0.1:{port}");
 
     tauri::Builder::default()
+        .manage(updater::UpdaterState::new())
+        .invoke_handler(tauri::generate_handler![
+            updater::check_update,
+            updater::download_update,
+            updater::get_download_progress,
+        ])
         .setup(move |app| {
             let url = format!("http://127.0.0.1:{port}/?app=1");
             let _win = tauri::WebviewWindowBuilder::new(
