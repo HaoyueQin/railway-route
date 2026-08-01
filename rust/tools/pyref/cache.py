@@ -13,7 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from src.models import SearchRequest
+from pyref.models import SearchRequest
 
 _CACHE_DB = Path(__file__).resolve().parent.parent / ".search_cache.sqlite"
 _MAX_ENTRIES = 300        # 内存缓存上限（条目数）

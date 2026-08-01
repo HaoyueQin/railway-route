@@ -3,7 +3,7 @@
 import re
 from collections.abc import Mapping
 
-from src.models import SEARCH_PROFILES, SearchRequest
+from pyref.models import SEARCH_PROFILES, SearchRequest
 
 
 _TIME_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")

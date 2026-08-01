@@ -1,35 +1,31 @@
-# .gitignore
+# .gitignore (master-v2: Rust + Tauri)
 
-# 数据文件（过大，不入库）
-data/w.db
+# 数据文件（过大，不入库，需自行获取）
 data/timetable/
 data/output/
 
 # Handover 文档（本地参考，不入库）
 HANDOVER.md
-*.pyc
 
-# IDE
+# IDE / OS
 .idea/
 .vscode/
-
-# OS
 .DS_Store
 Thumbs.db
 
 # 中间产物 / 缓存（可重新生成）
-tools/review_batch*.txt
 gui-test-screenshots/
-.search_cache.sqlite
 .reasonix/
 .zcode/
-# 构建产物
+*.pyc
+__pycache__/
+data/w.db
+.search_cache.sqlite
 build/
 dist/
 *.spec
-# Rust 重构构建产物
+# Rust 构建产物
 rust/target/
 rust/gen/
-
 # Rust 对拍中间产物（依赖 data/ 可重新生成）
 rust/tools/*_baseline.json

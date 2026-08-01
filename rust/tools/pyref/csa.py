@@ -28,9 +28,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
-from src.graph import RailwayGraph
-from src.matcher import MatcherData, resolve_station_set, resolve_city_code
-from src.models import (
+from pyref.graph import RailwayGraph
+from pyref.matcher import MatcherData, resolve_station_set, resolve_city_code
+from pyref.models import (
     InterstationTransferSegment,
     RouteResult,
     SearchMetadata,

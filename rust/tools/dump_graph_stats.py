@@ -13,8 +13,9 @@ import os
 import random
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from graph import RailwayGraph  # noqa: E402
+# pyref：Rust 对拍的 Python 参考实现（master 的 src/ 子集）
+sys.path.insert(0, os.path.dirname(__file__))
+from pyref.graph import RailwayGraph  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 CSV = os.path.join(ROOT, "data", "output", "车次时刻表.csv")

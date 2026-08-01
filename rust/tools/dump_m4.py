@@ -13,13 +13,14 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from src.csa import search as csa_search  # noqa: E402
-from src.graph import RailwayGraph  # noqa: E402
-from src.main import score_routes, typed_route_to_dict  # noqa: E402
-from src.matcher import build_matcher, fuzzy_match  # noqa: E402
-from src.models import format_absolute_minutes  # noqa: E402
-from src.validation import RequestValidationError, build_search_request  # noqa: E402
+# pyref：Rust 对拍的 Python 参考实现（master 的 src/ 子集）
+sys.path.insert(0, os.path.dirname(__file__))
+from pyref.csa import search as csa_search  # noqa: E402
+from pyref.graph import RailwayGraph  # noqa: E402
+from pyref.main import score_routes, typed_route_to_dict  # noqa: E402
+from pyref.matcher import build_matcher, fuzzy_match  # noqa: E402
+from pyref.models import format_absolute_minutes  # noqa: E402
+from pyref.validation import RequestValidationError, build_search_request  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 CSV = os.path.join(ROOT, "data", "output", "车次时刻表.csv")
