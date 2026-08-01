@@ -116,6 +116,9 @@ document.querySelectorAll("#dd-search-profile .seg-btn").forEach(btn => {
 //   1) JS 桥已就绪（window.pywebview 立即可用）
 //   2) pywebviewready 事件（桥注入晚于页面脚本时的标准时序）
 //   3) 打包 URL 显式携带 ?app=1（run_app 加载时附加，兜底）
+function isTauriEnv() {
+  return !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+}
 function initAppMode() {
   if (document.body.classList.contains("app-mode")) return;
   document.body.classList.add("app-mode");
@@ -124,6 +127,71 @@ function initAppMode() {
   const min = document.getElementById("tb-min");
   const maxBtn = document.getElementById("tb-max");
   const close = document.getElementById("tb-close");
+
+  if (isTauriEnv()) {
+    // ── Tauri 窗口控制（withGlobalTauri 全局注入 window.__TAURI__）──
+    const win = () => window.__TAURI__.window.getCurrentWindow();
+    const PhysicalSize = window.__TAURI__.dpi.PhysicalSize;
+    if (min) min.addEventListener("click", () => { try { win().minimize(); } catch (e) {} });
+    if (close) close.addEventListener("click", () => { try { win().close(); } catch (e) {} });
+    const syncMaxIcon = async () => {
+      try {
+        const m = await win().isMaximized();
+        maxBtn.classList.toggle("maxed", m);
+        maxBtn.title = m ? "还原" : "最大化";
+      } catch (e) {}
+    };
+    const toggleMax = async () => {
+      try { await win().toggleMaximize(); } catch (e) {}
+      setTimeout(syncMaxIcon, 120);
+    };
+    if (maxBtn) maxBtn.addEventListener("click", toggleMax);
+    if (tb) {
+      const brand = tb.querySelector(".tb-brand");
+      if (brand) brand.addEventListener("dblclick", toggleMax);
+    }
+    try { win().onResized(syncMaxIcon); } catch (e) {}
+    // frameless 无系统 resize 边框：边缘热区 + setSize（物理像素）
+    const mk = (id, cls, cursor) => {
+      const el = document.createElement("div");
+      el.id = id; el.className = "resize-handle " + cls; el.style.cursor = cursor;
+      document.body.appendChild(el);
+      return el;
+    };
+    const hE = mk("resize-e", "re-e", "ew-resize");
+    const hS = mk("resize-s", "re-s", "ns-resize");
+    const hSE = mk("resize-se", "re-se", "nwse-resize");
+    const startResize = handle => e => {
+      e.preventDefault();
+      const startX = e.clientX, startY = e.clientY;
+      const w0 = window.innerWidth, h0 = window.innerHeight;
+      let last = 0;
+      const move = ev => {
+        const now = performance.now();
+        if (now - last < 16) return;
+        last = now;
+        let nw = w0, nh = h0;
+        const mode = handle.dataset.mode;
+        if (mode === "e" || mode === "se") nw = Math.max(640, w0 + (ev.clientX - startX));
+        if (mode === "s" || mode === "se") nh = Math.max(480, h0 + (ev.clientY - startY));
+        const dpr = window.devicePixelRatio || 1;
+        try { win().setSize(new PhysicalSize(Math.round(nw * dpr), Math.round(nh * dpr))); } catch (err) {}
+      };
+      const up = () => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    };
+    hE.dataset.mode = "e"; hS.dataset.mode = "s"; hSE.dataset.mode = "se";
+    hE.addEventListener("pointerdown", startResize(hE));
+    hS.addEventListener("pointerdown", startResize(hS));
+    hSE.addEventListener("pointerdown", startResize(hSE));
+    return;
+  }
+
+  // ── pywebview 窗口控制 ──
   if (min) min.addEventListener("click", () => { try { window.pywebview.api.minimize(); } catch (e) {} });
   if (close) close.addEventListener("click", () => { try { window.pywebview.api.close(); } catch (e) {} });
   // 最大化/还原：点击切换图标；双击标题栏拖动区也可切换（Windows 习惯）。

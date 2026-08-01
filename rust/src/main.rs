@@ -20,7 +20,7 @@ mod validation;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use graph::Graph;
 use json::Json;
@@ -32,8 +32,20 @@ fn main() {
     let js = root.join("data/timetable/station_name.js");
     let baseline = root.join("rust/tools/m2_baseline.json");
 
-    // ── --serve 模式：构建图 + 启动 HTTP 服务（M5 桌面窗口的 API 底座）──
     let args: Vec<String> = std::env::args().collect();
+
+    // ── --app 模式：Tauri 桌面窗口（frameless + 自绘标题栏，前端零改动）──
+    if args.iter().any(|a| a == "--app") {
+        let (data_root, web_dir) = find_app_resources();
+        run_tauri(
+            &data_root.join("output/车次时刻表.csv"),
+            &data_root.join("timetable/station_name.js"),
+            &web_dir,
+        );
+        return;
+    }
+
+    // ── --serve 模式：构建图 + 启动 HTTP 服务（M5 桌面窗口的 API 底座）──
     if args.iter().any(|a| a == "--serve") {
         let port = args
             .iter()
@@ -275,6 +287,100 @@ fn main() {
         return;
     }
     verify_m4(&g, &matcher, &m4_baseline);
+}
+
+/// ── Tauri 桌面应用模式 ──
+/// HTTP server 在后台线程提供 /api/* 与静态文件，窗口动态创建
+/// （端口启动后才知道，无法写死在 tauri.conf.json 的 windows[].url），
+/// frameless 无系统边框 → 前端自绘标题栏（-webkit-app-region 拖动 +
+/// window.__TAURI__ 窗口控制，withGlobalTauri 全局注入）。
+///
+/// 资源路径探测顺序（打包后数据与前端必须随 exe 分发）：
+/// 1. exe 同级 _up_/data（Tauri 2 NSIS 安装布局：resources 装在 _up_ 子目录）
+/// 2. exe 同级 data/（手动拷贝/绿色分发布局）
+/// 3. exe 同级 resources/data（Tauri v2 可能的子目录布局）
+/// 4. 仓库根 data/（开发模式 cargo run）
+fn find_app_resources() -> (std::path::PathBuf, std::path::PathBuf) {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(d) = &exe_dir {
+        candidates.push(d.join("_up_/data"));
+        candidates.push(d.join("data"));
+        candidates.push(d.join("resources/data"));
+    }
+    candidates.push(manifest_root.join("data"));
+    for data_root in &candidates {
+        let (csv, js) = (
+            data_root.join("output/车次时刻表.csv"),
+            data_root.join("timetable/station_name.js"),
+        );
+        if csv.exists() && js.exists() {
+            // web 目录与 data 同根（_up_/web、exe 旁 web/ 或仓库根 web/）
+            let web = data_root
+                .parent()
+                .map(|r| {
+                    if r.join("web/index.html").exists() {
+                        r.join("web")
+                    } else {
+                        manifest_root.join("web")
+                    }
+                })
+                .unwrap_or_else(|| manifest_root.join("web"));
+            return (data_root.clone(), web);
+        }
+    }
+    eprintln!(
+        "未找到数据目录：需存在 data/output/车次时刻表.csv 与 data/timetable/station_name.js\n\
+         尝试过：{}",
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" / ")
+    );
+    std::process::exit(1);
+}
+
+fn run_tauri(csv: &Path, js: &Path, web_dir: &Path) {
+    let mut g = Graph::new();
+    g.build(csv, js).expect("构建图失败");
+    let matcher = matcher::build_matcher(&g, js).expect("构建 matcher 失败");
+
+    // HTTP 服务线程：端口绑定成功即通过回调通知主线程（serve 阻塞在请求循环）
+    let (tx, rx) = std::sync::mpsc::channel::<u16>();
+    let n_stations = g.station_count();
+    let n_trains = g.train_stops.len();
+    let web_owned = web_dir.to_path_buf();
+    std::thread::spawn(move || {
+        http::serve_with_cb(&g, &matcher, &web_owned, 8800, move |p| {
+            let _ = tx.send(p);
+        })
+        .expect("HTTP 服务失败");
+    });
+    let port = rx.recv().expect("获取 HTTP 端口失败");
+    println!("数据加载完成（{n_stations} 站 / {n_trains} 车次），Tauri 窗口 → http://127.0.0.1:{port}");
+
+    tauri::Builder::default()
+        .setup(move |app| {
+            let url = format!("http://127.0.0.1:{port}/?app=1");
+            let _win = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::External(url.parse().expect("非法 URL")),
+            )
+                .title("铁路出行路径规划")
+                .inner_size(1280.0, 880.0)
+                .min_inner_size(980.0, 640.0)
+                .resizable(true)
+                .decorations(false) // frameless：前端自绘标题栏
+                .build()?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("Tauri 运行失败");
 }
 
 /// M1 数据层回归（与 d8fa3df 相同的断言基准）。

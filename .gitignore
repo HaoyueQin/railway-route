@@ -29,6 +29,7 @@ dist/
 *.spec
 # Rust 重构构建产物
 rust/target/
+rust/gen/
 
 # Rust 对拍中间产物（依赖 data/ 可重新生成）
 rust/tools/*_baseline.json

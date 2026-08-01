@@ -153,12 +153,15 @@ fn serve_static(web_dir: &std::path::Path, name: &str) -> (u16, String, Vec<u8>)
 }
 
 /// 启动 HTTP 服务（阻塞；指定端口被占用则递增，超 100 次后端口 0 兜底，对齐 _start_server）。
-pub fn serve(
+/// `on_ready` 在端口确定后立即回调（serve 本身阻塞在请求循环，
+/// 调用方需要端口时（如 Tauri 窗口 URL）必须用回调而非等待返回值）。
+pub fn serve_with_cb(
     graph: &Graph,
     matcher: &MatcherData,
     web_dir: &std::path::Path,
     port: u16,
-) -> std::io::Result<u16> {
+    on_ready: impl FnOnce(u16),
+) -> std::io::Result<()> {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(_) => (port + 1..port.saturating_add(100))
@@ -168,11 +171,26 @@ pub fn serve(
     };
     let actual = listener.local_addr()?.port();
     println!("HTTP 服务已启动: http://127.0.0.1:{actual}");
+    on_ready(actual);
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => handle_connection(&mut s, graph, matcher, web_dir),
             Err(_) => continue,
         }
     }
-    Ok(actual)
+    Ok(())
+}
+
+/// 启动 HTTP 服务（阻塞；端口在内部打印，调用方无需等待返回值）。
+pub fn serve(
+    graph: &Graph,
+    matcher: &MatcherData,
+    web_dir: &std::path::Path,
+    port: u16,
+) -> std::io::Result<u16> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    serve_with_cb(graph, matcher, web_dir, port, move |p| {
+        let _ = tx.send(p);
+    })?;
+    Ok(rx.recv().unwrap_or(0))
 }
