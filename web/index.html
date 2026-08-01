@@ -12,21 +12,25 @@
   <canvas id="bg-canvas"></canvas>
 </div>
 
-<!-- 桌面应用自绘标题栏（仅 pywebview 环境显示，浏览器模式隐藏） -->
+<!-- 桌面应用自绘标题栏（仅桌面窗口环境显示，浏览器模式隐藏） -->
 <div id="titlebar" hidden>
-  <div class="tb-brand">
+  <div class="tb-brand" data-tauri-drag-region>
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 9h14M9 3v6M15 3v6M8 17l-2 4M16 17l2 4"/></svg>
-    <span class="tb-title">铁路出行路径规划</span>
+    <span class="tb-title" data-i18n="app.title">铁路出行路径规划</span>
   </div>
   <div class="tb-actions">
-    <button type="button" class="tb-btn" id="tb-min" title="最小化" aria-label="最小化">
+    <button type="button" class="tb-btn" id="tb-lang" data-lang-toggle title="切换语言（中文 / English）" aria-label="切换语言（中文 / English）">EN</button>
+    <button type="button" class="tb-btn" id="tb-settings" data-i18n-title="tb.settings" title="设置" aria-label="设置">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <button type="button" class="tb-btn" id="tb-min" data-i18n-title="tb.min" title="最小化" aria-label="最小化">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
     </button>
-    <button type="button" class="tb-btn" id="tb-max" title="最大化" aria-label="最大化">
+    <button type="button" class="tb-btn" id="tb-max" data-i18n-title="tb.max" title="最大化" aria-label="最大化">
       <svg class="ic ic-max" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>
       <svg class="ic ic-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="10" height="10" rx="1.5"/><path d="M6 14.5v-6A1.5 1.5 0 0 1 7.5 7h6"/></svg>
     </button>
-    <button type="button" class="tb-btn tb-close" id="tb-close" title="关闭" aria-label="关闭">
+    <button type="button" class="tb-btn tb-close" id="tb-close" data-i18n-title="tb.close" title="关闭" aria-label="关闭">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
@@ -35,15 +39,21 @@
 <nav class="nv"><div class="nv-in">
   <span class="nv-logo">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 9h14M9 3v6M15 3v6M8 17l-2 4M16 17l2 4"/></svg>
-    铁路出行路径规划
+    <span data-i18n="app.title">铁路出行路径规划</span>
   </span>
-  <span class="nv-sub">全国铁路出行方案 · 14,173 车次 · 3,305 车站</span>
+  <span class="nv-right">
+    <span class="nv-sub" data-i18n="app.sub">全国铁路出行方案 · 14,173 车次 · 3,305 车站</span>
+    <button type="button" class="nv-btn" id="nv-lang" data-lang-toggle title="切换语言（中文 / English）" aria-label="切换语言（中文 / English）">EN</button>
+    <button type="button" class="nv-btn" id="nv-settings" data-i18n-title="tb.settings" title="设置" aria-label="设置">
+      <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </span>
 </div></nav>
 
 <div class="hero">
   <div class="hero-inner">
-    <h1>铁路出行路径规划</h1>
-    <p>输入出发与目的站，一站式对比直达与换乘方案 · 支持同城多站与异站换乘 · 覆盖全国铁路时刻表</p>
+    <h1 data-i18n="app.title">铁路出行路径规划</h1>
+    <p data-i18n="hero.desc">输入出发与目的站，一站式对比直达与换乘方案 · 支持同城多站与异站换乘 · 覆盖全国铁路时刻表</p>
   </div>
 </div>
 
@@ -52,28 +62,28 @@
 <section class="search-card">
   <div class="search-row">
     <div class="station-box">
-      <label class="s-label" for="from">出发站 / 城市</label>
+      <label class="s-label" for="from" data-i18n="search.from">出发站 / 城市</label>
       <div class="s-input-wrap">
-        <input id="from" class="inp" placeholder="如：北京 / 北京南" autocomplete="off">
-        <button type="button" class="end-mode" id="from-mode" title="点击切换：该端全部站 / 仅本站">全部站</button>
+        <input id="from" class="inp" data-i18n-ph="search.fromPh" placeholder="如：北京 / 北京南" autocomplete="off">
+        <button type="button" class="end-mode" id="from-mode" title="点击切换：该端全部站 / 仅本站" data-i18n="search.all">全部站</button>
       </div>
       <div id="from-sugg" class="sgs"></div>
     </div>
-    <button type="button" class="swap-btn" id="btn-swap" title="交换起终点" aria-label="交换起终点">
+    <button type="button" class="swap-btn" id="btn-swap" data-i18n-title="search.swap" title="交换起终点" aria-label="交换起终点">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16l-4-4 4-4"/><path d="M3 12h14"/><path d="M17 8l4 4-4 4"/><path d="M21 12H7"/></svg>
     </button>
     <div class="station-box">
-      <label class="s-label" for="to">目的站 / 城市</label>
+      <label class="s-label" for="to" data-i18n="search.to">目的站 / 城市</label>
       <div class="s-input-wrap">
-        <input id="to" class="inp" placeholder="如：上海 / 上海虹桥" autocomplete="off">
-        <button type="button" class="end-mode" id="to-mode" title="点击切换：该端全部站 / 仅本站">全部站</button>
+        <input id="to" class="inp" data-i18n-ph="search.toPh" placeholder="如：上海 / 上海虹桥" autocomplete="off">
+        <button type="button" class="end-mode" id="to-mode" title="点击切换：该端全部站 / 仅本站" data-i18n="search.all">全部站</button>
       </div>
       <div id="to-sugg" class="sgs"></div>
     </div>
     <div class="search-cta">
       <button class="bt" id="btn-search" type="button">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-        搜索出行方案
+        <span data-i18n="search.go">搜索出行方案</span>
       </button>
     </div>
   </div>
@@ -81,7 +91,7 @@
   <div class="adv-toggle" id="adv-toggle">
     <button type="button" class="adv-btn" aria-expanded="false">
       <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      高级选项 <span class="adv-caret" aria-hidden="true"></span>
+      <span data-i18n="adv.toggle">高级选项</span> <span class="adv-caret" aria-hidden="true"></span>
     </button>
   </div>
 
@@ -91,28 +101,28 @@
         <div class="adv-group">
           <div class="adv-hd">
             <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-            时间约束 <span class="adv-hint">（留空 = 全天）</span>
+            <span data-i18n="adv.time">时间约束</span> <span class="adv-hint" data-i18n="adv.timeHint">（留空 = 全天）</span>
           </div>
           <div class="adv-grid2">
-            <div class="fld"><label class="fld-lbl" for="dep-after">出发不早于</label>
+            <div class="fld"><label class="fld-lbl" for="dep-after" data-i18n="adv.depAfter">出发不早于</label>
               <div class="time-pick" id="dep-after" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
                 <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
-                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear" data-i18n="adv.clear">清除</button></div>
               </div></div>
-            <div class="fld"><label class="fld-lbl" for="dep-before">出发不晚于</label>
+            <div class="fld"><label class="fld-lbl" for="dep-before" data-i18n="adv.depBefore">出发不晚于</label>
               <div class="time-pick" id="dep-before" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
                 <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
-                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear" data-i18n="adv.clear">清除</button></div>
               </div></div>
-            <div class="fld"><label class="fld-lbl" for="arr-after">到达不早于</label>
+            <div class="fld"><label class="fld-lbl" for="arr-after" data-i18n="adv.arrAfter">到达不早于</label>
               <div class="time-pick" id="arr-after" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
                 <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
-                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear" data-i18n="adv.clear">清除</button></div>
               </div></div>
-            <div class="fld"><label class="fld-lbl" for="arr-before">到达不晚于</label>
+            <div class="fld"><label class="fld-lbl" for="arr-before" data-i18n="adv.arrBefore">到达不晚于</label>
               <div class="time-pick" id="arr-before" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
                 <div class="tp-head"><span class="tp-val">--:--</span><span class="tp-caret" aria-hidden="true"></span></div>
-                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear">清除</button></div>
+                <div class="tp-pop"><div class="wheel-row"></div><button type="button" class="tp-clear" data-i18n="adv.clear">清除</button></div>
               </div></div>
           </div>
         </div>
@@ -121,18 +131,24 @@
         <div class="adv-group">
           <div class="adv-hd">
             <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v5M16 3v5M3 8h18M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M9 13h6M9 17h4"/></svg>
-            换乘设置
+            <span data-i18n="adv.xfer">换乘设置</span>
           </div>
           <div class="xfer-grid">
-            <div class="fld"><label class="fld-lbl">同站换乘</label>
-              <div class="wheel-row" id="same-wheel"></div></div>
-            <div class="fld"><label class="fld-lbl">异站换乘</label>
-              <div class="wheel-row" id="inter-wheel"></div></div>
+            <div class="fld"><label class="fld-lbl" data-i18n="adv.same">同站换乘</label>
+              <div class="time-pick" id="same-pick" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">00:15</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div></div>
+              </div></div>
+            <div class="fld"><label class="fld-lbl" data-i18n="adv.inter">异站换乘</label>
+              <div class="time-pick" id="inter-pick" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">01:00</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div></div>
+              </div></div>
             <div class="xfer-side">
-              <div class="fld"><label class="fld-lbl">最大换乘</label>
+              <div class="fld"><label class="fld-lbl" data-i18n="adv.maxXfer">最大换乘</label>
                 <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>
-              <div class="fld"><label class="fld-lbl" for="xfer-at">指定换乘城市（留空 = 不限）</label>
-                <input id="xfer-at" class="inp" placeholder="如：武汉 / 郑州" autocomplete="off"></div>
+              <div class="fld"><label class="fld-lbl" for="xfer-at" data-i18n="adv.xferAt">指定换乘城市（留空 = 不限）</label>
+                <input id="xfer-at" class="inp" data-i18n-ph="adv.xferAtPh" placeholder="如：武汉 / 郑州" autocomplete="off"></div>
             </div>
           </div>
         </div>
@@ -141,15 +157,15 @@
         <div class="adv-group">
           <div class="adv-hd">
             <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-            搜索强度
+            <span data-i18n="adv.profile">搜索强度</span>
           </div>
           <div class="seg" id="dd-search-profile" role="group" aria-label="搜索档位">
-            <button type="button" class="seg-btn" data-v="fast">快速</button>
-            <button type="button" class="seg-btn sel" data-v="balanced">均衡</button>
-            <button type="button" class="seg-btn" data-v="thorough">全面</button>
-            <button type="button" class="seg-btn" data-v="complete">完整</button>
+            <button type="button" class="seg-btn" data-v="fast" data-i18n="adv.pFast">快速</button>
+            <button type="button" class="seg-btn sel" data-v="balanced" data-i18n="adv.pBalanced">均衡</button>
+            <button type="button" class="seg-btn" data-v="thorough" data-i18n="adv.pThorough">全面</button>
+            <button type="button" class="seg-btn" data-v="complete" data-i18n="adv.pComplete">完整</button>
           </div>
-          <div class="adv-hint2">档位越高搜索越完整，耗时越长</div>
+          <div class="adv-hint2" data-i18n="adv.profileHint">档位越高搜索越完整，耗时越长</div>
         </div>
       </div>
     </div>
@@ -159,6 +175,86 @@
 <div id="results"></div>
 </main>
 
+<!-- 设置面板（模态遮罩 + 玻璃面板） -->
+<div class="set-mask" id="set-mask" hidden>
+  <div class="set-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <div class="set-hd">
+      <span class="set-title" data-i18n="set.title">设置</span>
+      <button type="button" class="set-close" id="set-close" data-i18n-title="set.close" title="关闭" aria-label="关闭">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="set-body">
+
+      <div class="set-sec">
+        <div class="set-sec-hd" data-i18n="set.lang">界面语言</div>
+        <div class="seg" id="set-lang" role="group">
+          <button type="button" class="seg-btn sel" data-v="zh" data-i18n="set.zh">中文</button>
+          <button type="button" class="seg-btn" data-v="en" data-i18n="set.en">English</button>
+        </div>
+      </div>
+
+      <div class="set-sec">
+        <div class="set-sec-hd" data-i18n="set.theme">外观主题</div>
+        <div class="seg" id="set-theme" role="group">
+          <button type="button" class="seg-btn sel" data-v="light" data-i18n="set.themeLight">浅色</button>
+          <button type="button" class="seg-btn" data-v="dark" data-i18n="set.themeDark">深色</button>
+          <button type="button" class="seg-btn" data-v="system" data-i18n="set.themeSystem">跟随系统</button>
+        </div>
+      </div>
+
+      <div class="set-sec">
+        <div class="set-sec-hd" data-i18n="set.search">搜索默认值</div>
+        <div class="set-grid">
+          <div class="fld"><label class="fld-lbl" data-i18n="set.profile">搜索强度</label>
+            <div class="seg" id="set-profile" role="group">
+              <button type="button" class="seg-btn" data-v="fast" data-i18n="adv.pFast">快速</button>
+              <button type="button" class="seg-btn sel" data-v="balanced" data-i18n="adv.pBalanced">均衡</button>
+              <button type="button" class="seg-btn" data-v="thorough" data-i18n="adv.pThorough">全面</button>
+              <button type="button" class="seg-btn" data-v="complete" data-i18n="adv.pComplete">完整</button>
+            </div></div>
+          <div class="fld"><label class="fld-lbl" data-i18n="set.matchMode">匹配模式</label>
+            <div class="seg" id="set-match" role="group">
+              <button type="button" class="seg-btn sel" data-v="fuzzy" data-i18n="set.matchFuzzy">同城扩展（模糊）</button>
+              <button type="button" class="seg-btn" data-v="exact" data-i18n="set.matchExact">仅本站（精确）</button>
+            </div></div>
+          <div class="fld"><label class="fld-lbl" data-i18n="set.sameXfer">同站换乘（分钟）</label>
+            <input type="number" id="set-same" class="inp" min="0" max="180" step="1"></div>
+          <div class="fld"><label class="fld-lbl" data-i18n="set.interXfer">异站换乘（分钟）</label>
+            <input type="number" id="set-inter" class="inp" min="0" max="600" step="1"></div>
+          <div class="fld"><label class="fld-lbl" data-i18n="set.maxXfer">最大换乘</label>
+            <input type="number" id="set-max" class="inp" min="0" max="10" step="1"></div>
+        </div>
+      </div>
+
+      <div class="set-sec">
+        <div class="set-sec-hd" data-i18n="set.update">检查更新</div>
+        <div class="set-upd">
+          <div class="set-upd-row">
+            <span class="set-ver" id="set-ver"></span>
+            <button type="button" class="bt bt-sm" id="set-check" data-i18n="set.checkNow">检查更新</button>
+          </div>
+          <div class="set-upd-msg" id="set-upd-msg"></div>
+          <div class="set-progress" id="set-progress" hidden>
+            <div class="set-progress-bar" id="set-progress-bar"></div>
+            <span class="set-progress-txt" id="set-progress-txt"></span>
+          </div>
+          <div class="set-upd-notes" id="set-upd-notes"></div>
+          <label class="set-chk"><input type="checkbox" id="set-autocheck"><span data-i18n="set.autoCheck">启动时自动检查更新</span></label>
+          <div class="fld"><label class="fld-lbl" for="set-proxy" data-i18n="set.proxy">更新代理（空 = 系统代理）</label>
+            <input id="set-proxy" class="inp" data-i18n-ph="set.proxyPh" placeholder="如 127.0.0.1:8897" autocomplete="off"></div>
+        </div>
+      </div>
+
+    </div>
+    <div class="set-ft">
+      <button type="button" class="bt bt-ghost" id="set-reset" data-i18n="set.reset">恢复默认设置</button>
+      <span class="set-saved" id="set-saved" hidden data-i18n="set.saved">设置已保存</span>
+    </div>
+  </div>
+</div>
+
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
