@@ -67,6 +67,21 @@
         <input id="from" class="inp" data-i18n-ph="search.fromPh" placeholder="如：北京 / 北京南" autocomplete="off">
         <button type="button" class="end-mode" id="from-mode" title="点击切换：该端全部站 / 仅本站" data-i18n="search.all">全部站</button>
       </div>
+      <div class="st-picker" id="from-picker" hidden>
+        <div class="seg st-mode" role="group">
+          <button type="button" class="seg-btn sel" data-v="fuzzy" data-i18n="search.all">全部站</button>
+          <button type="button" class="seg-btn" data-v="multi" data-i18n="st.multi">自定义</button>
+          <button type="button" class="seg-btn" data-v="exact" data-i18n="search.this">仅本站</button>
+        </div>
+        <div class="st-multi" hidden>
+          <input type="text" class="inp st-search" data-i18n-ph="st.searchPh" placeholder="搜索车站…" autocomplete="off">
+          <div class="st-list"></div>
+          <div class="st-foot">
+            <span class="st-sum"></span>
+            <button type="button" class="bt bt-sm st-ok" data-i18n="st.confirm">确定</button>
+          </div>
+        </div>
+      </div>
       <div id="from-sugg" class="sgs"></div>
     </div>
     <button type="button" class="swap-btn" id="btn-swap" data-i18n-title="search.swap" title="交换起终点" aria-label="交换起终点">
@@ -77,6 +92,21 @@
       <div class="s-input-wrap">
         <input id="to" class="inp" data-i18n-ph="search.toPh" placeholder="如：上海 / 上海虹桥" autocomplete="off">
         <button type="button" class="end-mode" id="to-mode" title="点击切换：该端全部站 / 仅本站" data-i18n="search.all">全部站</button>
+      </div>
+      <div class="st-picker" id="to-picker" hidden>
+        <div class="seg st-mode" role="group">
+          <button type="button" class="seg-btn sel" data-v="fuzzy" data-i18n="search.all">全部站</button>
+          <button type="button" class="seg-btn" data-v="multi" data-i18n="st.multi">自定义</button>
+          <button type="button" class="seg-btn" data-v="exact" data-i18n="search.this">仅本站</button>
+        </div>
+        <div class="st-multi" hidden>
+          <input type="text" class="inp st-search" data-i18n-ph="st.searchPh" placeholder="搜索车站…" autocomplete="off">
+          <div class="st-list"></div>
+          <div class="st-foot">
+            <span class="st-sum"></span>
+            <button type="button" class="bt bt-sm st-ok" data-i18n="st.confirm">确定</button>
+          </div>
+        </div>
       </div>
       <div id="to-sugg" class="sgs"></div>
     </div>

@@ -199,8 +199,12 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _match(self, qs):
         q = qs.get("q", [""])[0]
+        try:
+            limit = int(qs.get("limit", ["15"])[0])
+        except ValueError:
+            limit = 15
         matches = fuzzy_match(q, self.graph, self.matcher)
-        self._json({"matches": [m[1] for m in matches[:15]]})
+        self._json({"matches": [m[1] for m in matches[:max(1, min(limit, 500))]]})
 
     def _train(self, qs):
         """车次全程时刻表：始发终到站 + 全部停站时刻（含跨夜 +N 天标记）。"""

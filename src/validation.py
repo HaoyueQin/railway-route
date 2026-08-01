@@ -72,6 +72,18 @@ def build_search_request(mapping: Mapping) -> SearchRequest:
         if val is not None and val not in ("exact", "fuzzy"):
             raise RequestValidationError("INVALID_MATCH_MODE", f"{name} 必须是 exact 或 fuzzy")
 
+    # 多站精确模式：逗号分隔的站名（北京南,北京西,北京丰台）→ 每站精确解析取并集
+    # （"两端任意选择多个车站"需求）。含逗号即多站，每站走 resolve_single，不做扩散。
+    def _multi(q: str) -> list[str] | None:
+        parts = [s.strip() for s in q.split(",") if s.strip()]
+        return parts if len(parts) > 1 else None
+
+    from_stations = _multi(from_q)
+    to_stations = _multi(to_q)
+    for name, st in (("出发站", from_stations), ("目的站", to_stations)):
+        if st is not None and len(st) > 50:
+            raise RequestValidationError("TOO_MANY_STATIONS", f"{name}最多 50 个")
+
     profile = _value(mapping, "search_profile", "balanced")
     if profile not in SEARCH_PROFILES:
         raise RequestValidationError("INVALID_SEARCH_PROFILE", "search_profile 必须是 fast/balanced/thorough/complete")
@@ -118,6 +130,8 @@ def build_search_request(mapping: Mapping) -> SearchRequest:
         match_mode=match_mode,
         from_mode=from_mode,
         to_mode=to_mode,
+        from_stations=from_stations,
+        to_stations=to_stations,
         search_profile=profile,
         earliest_depart=dep_after,
         latest_depart=dep_before,

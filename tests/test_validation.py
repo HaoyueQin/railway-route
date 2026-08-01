@@ -56,6 +56,22 @@ class ValidationTest(unittest.TestCase):
         self.assertEqual(request.latest_arrive, 1380)
         self.assertEqual(request.timeout_seconds, 120)
 
+    def test_build_request_multi_stations(self):
+        """逗号分隔多站 → from_stations/to_stations（每站精确，任意数量）。"""
+        request = build_search_request({"from": "甲站,乙站,丙站", "to": "丁站"})
+        self.assertEqual(request.from_stations, ["甲站", "乙站", "丙站"])
+        self.assertIsNone(request.to_stations)
+        # 单站（无逗号）不触发多站
+        request2 = build_search_request({"from": "甲站", "to": "乙站"})
+        self.assertIsNone(request2.from_stations)
+        # 多站 + from_mode 参数不冲突（multi 由逗号参数驱动）
+        request3 = build_search_request({"from": "甲站,乙站", "to": "丁站", "from_mode": "exact"})
+        self.assertEqual(request3.from_stations, ["甲站", "乙站"])
+
+    def test_multi_stations_limit(self):
+        with self.assertRaises(RequestValidationError):
+            build_search_request({"from": ",".join(f"站{i}" for i in range(51)), "to": "丁站"})
+
     def test_invalid_modes_and_ranges(self):
         cases = [
             ({"from": "甲", "to": "乙", "match_mode": "wide"}, "INVALID_MATCH_MODE"),

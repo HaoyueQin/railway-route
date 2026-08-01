@@ -29,7 +29,17 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.graph import RailwayGraph
-from src.matcher import MatcherData, resolve_station_set, resolve_city_code
+from src.matcher import MatcherData, resolve_station_set, resolve_city_code, resolve_single
+
+
+def _resolve_multi(stations: list[str], graph, matcher: MatcherData) -> list[str]:
+    """多站精确解析：每站 resolve_single（精确单站），保序去重取并集。"""
+    names: list[str] = []
+    for s in stations:
+        name = resolve_single(s, graph, matcher)
+        if name not in names:
+            names.append(name)
+    return names
 from src.models import (
     InterstationTransferSegment,
     RouteResult,
@@ -703,11 +713,18 @@ def search(
     settings = SEARCH_PROFILES.get(request.search_profile, SEARCH_PROFILES["balanced"])
     timeout = min(request.timeout_seconds, settings.default_timeout_seconds)
 
-    # ── 解析起终点集合（每端可独立 exact/fuzzy：如 乌鲁木齐(全站)→北京西(单站)）──
-    source_names = resolve_station_set(
-        request.from_query, request.from_mode or request.match_mode, graph, matcher)
-    target_names = resolve_station_set(
-        request.to_query, request.to_mode or request.match_mode, graph, matcher)
+    # ── 解析起终点集合（每端可独立 exact/fuzzy：如 乌鲁木齐(全站)→北京西(单站)；
+    #    多站精确：from_stations/to_stations 非空时按列表逐站精确解析取并集）──
+    if request.from_stations:
+        source_names = _resolve_multi(request.from_stations, graph, matcher)
+    else:
+        source_names = resolve_station_set(
+            request.from_query, request.from_mode or request.match_mode, graph, matcher)
+    if request.to_stations:
+        target_names = _resolve_multi(request.to_stations, graph, matcher)
+    else:
+        target_names = resolve_station_set(
+            request.to_query, request.to_mode or request.match_mode, graph, matcher)
     source_set = {graph.station_to_idx[n] for n in source_names if n in graph.station_to_idx}
     target_set = {graph.station_to_idx[n] for n in target_names if n in graph.station_to_idx}
     if not source_set or not target_set:

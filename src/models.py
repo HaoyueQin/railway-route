@@ -35,6 +35,10 @@ class SearchRequest:
     # 每端独立匹配模式（None = 跟随 match_mode）：如 from_mode="exact" + to_mode="fuzzy"
     from_mode: Optional[MatchMode] = None
     to_mode: Optional[MatchMode] = None
+    # 多站精确模式：逗号分隔的站名列表（非空时优先于 from_query 的扩散解析，
+    # 每站按精确单站解析后取并集；"任意数量车站"需求）
+    from_stations: Optional[list[str]] = None
+    to_stations: Optional[list[str]] = None
     search_profile: SearchProfile = "balanced"
     earliest_depart: int = 0
     latest_depart: int = 2880

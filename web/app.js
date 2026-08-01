@@ -397,6 +397,7 @@ async function suggest(which) {
   const el = $id(which + "-sugg");
   el.innerHTML = "";
   if (q.length < 1) return;
+  if (q.includes(",")) return;  // 多站模式（逗号分隔）不做单站建议
   let d;
   try {
     d = await fetch("/api/match?q=" + encodeURIComponent(q)).then(r => r.json());
@@ -412,24 +413,120 @@ async function suggest(which) {
 $id("from").addEventListener("input", () => suggest("from"));
 $id("to").addEventListener("input", () => suggest("to"));
 
-// ── 每端独立匹配模式：全部站(fuzzy) / 本站(exact) ──
+// ── 每端站点模式：全部站(fuzzy) / 自定义多选(multi) / 仅本站(exact) ──
+const _st = { from: [], to: [] };  // 多选站列表（按端）
+
 function setEndMode(key, mode) {
   _form[key] = mode;
   const btn = $id(key.replace("Mode", "-mode"));
-  btn.textContent = mode === "exact" ? t("search.this") : t("search.all");
-  btn.classList.toggle("on", mode === "exact");
+  if (mode === "multi") {
+    const n = (_st[key === "fromMode" ? "from" : "to"] || []).length;
+    btn.textContent = t("st.count", { n: n });
+    btn.classList.add("on");
+  } else {
+    btn.textContent = mode === "exact" ? t("search.this") : t("search.all");
+    btn.classList.toggle("on", mode === "exact");
+  }
   btn.title = mode === "exact" ? t("search.modeThis") : t("search.modeAll");
 }
-$id("from-mode").addEventListener("click", () => setEndMode("fromMode", _form.fromMode === "exact" ? "fuzzy" : "exact"));
-$id("to-mode").addEventListener("click", () => setEndMode("toMode", _form.toMode === "exact" ? "fuzzy" : "exact"));
+
+// 站点选择器（全部站/自定义多选/仅本站）：点击模式按钮弹出
+function openStationPicker(which) {
+  const picker = $id(which + "-picker");
+  const other = $id(which === "from" ? "to-picker" : "from-picker");
+  other.hidden = true;
+  picker.hidden = !picker.hidden;
+  if (!picker.hidden) {
+    const mode = _form[which === "from" ? "fromMode" : "toMode"] || "fuzzy";
+    picker.querySelectorAll(".st-mode .seg-btn").forEach(b =>
+      b.classList.toggle("sel", b.dataset.v === mode));
+    const multi = picker.querySelector(".st-multi");
+    multi.hidden = mode !== "multi";
+    if (mode === "multi") {
+      const search = picker.querySelector(".st-search");
+      search.value = $id(which).value;
+      loadStationCandidates(which, search.value);
+    }
+  }
+}
+
+async function loadStationCandidates(which, q) {
+  const picker = $id(which + "-picker");
+  const list = picker.querySelector(".st-list");
+  const selected = _st[which];
+  list.innerHTML = "";
+  if (!q.trim()) return;
+  let d;
+  try {
+    d = await fetch("/api/match?q=" + encodeURIComponent(q) + "&limit=200").then(r => r.json());
+  } catch (e) { return; }
+  (d.matches || []).forEach(name => {
+    const row = document.createElement("label");
+    row.className = "st-item" + (selected.includes(name) ? " sel" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected.includes(name);
+    cb.addEventListener("change", () => {
+      const i = selected.indexOf(name);
+      if (cb.checked && i < 0) selected.push(name);
+      if (!cb.checked && i >= 0) selected.splice(i, 1);
+      row.classList.toggle("sel", cb.checked);
+      updateStSum(which);
+    });
+    const span = document.createElement("span");
+    span.textContent = name;
+    row.appendChild(cb);
+    row.appendChild(span);
+    list.appendChild(row);
+  });
+  updateStSum(which);
+}
+
+function updateStSum(which) {
+  const picker = $id(which + "-picker");
+  picker.querySelector(".st-sum").textContent =
+    _st[which].length ? t("st.count", { n: _st[which].length }) : "";
+}
+
+function bindStationPicker(which) {
+  const picker = $id(which + "-picker");
+  picker.querySelectorAll(".st-mode .seg-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.v;
+      picker.querySelectorAll(".st-mode .seg-btn").forEach(b =>
+        b.classList.toggle("sel", b === btn));
+      const multi = picker.querySelector(".st-multi");
+      multi.hidden = mode !== "multi";
+      if (mode === "multi") {
+        loadStationCandidates(which, picker.querySelector(".st-search").value || $id(which).value);
+      }
+      setEndMode(which + "Mode", mode);
+    });
+  });
+  picker.querySelector(".st-search").addEventListener("input", e =>
+    loadStationCandidates(which, e.target.value));
+  picker.querySelector(".st-ok").addEventListener("click", () => {
+    picker.hidden = true;
+    if (_form[which + "Mode"] === "multi") {
+      setEndMode(which + "Mode", "multi");
+      // 已选站回填到主输入框（逗号分隔，与后端多站参数一致）
+      if (_st[which].length) $id(which).value = _st[which].join(",");
+    }
+  });
+}
+bindStationPicker("from");
+bindStationPicker("to");
+$id("from-mode").addEventListener("click", () => openStationPicker("from"));
+$id("to-mode").addEventListener("click", () => openStationPicker("to"));
 
 // ── 搜索 ──
 async function search() {
   const from = $id("from").value.trim(), to = $id("to").value.trim();
   if (!from || !to) return;
   const p = new URLSearchParams({ from, to, match_mode: _form.matchMode, search_profile: _form.profile });
-  if (_form.fromMode) p.set("from_mode", _form.fromMode);
-  if (_form.toMode) p.set("to_mode", _form.toMode);
+  // 多站模式（multi）不发送 from_mode：逗号分隔的 from 参数即多站精确语义
+  if (_form.fromMode && _form.fromMode !== "multi") p.set("from_mode", _form.fromMode);
+  if (_form.toMode && _form.toMode !== "multi") p.set("to_mode", _form.toMode);
   // 时间约束（滚轮选择器；null = 不限）
   const times = [
     ["depAfter", "dep_after"], ["depBefore", "dep_before"],
@@ -772,11 +869,16 @@ $id("adv-toggle").addEventListener("click", () => {
   btn.setAttribute("aria-expanded", String(open));
 });
 
-// 交换起终点
+// 交换起终点（含多站列表与模式）
 $id("btn-swap").addEventListener("click", () => {
   const f = $id("from").value, t = $id("to").value;
   $id("from").value = t;
   $id("to").value = f;
+  const sf = _st.from, st = _st.to;
+  _st.from = st; _st.to = sf;
+  const mf = _form.fromMode, mt = _form.toMode;
+  if (mf) setEndMode("fromMode", mf);
+  if (mt) setEndMode("toMode", mt);
   suggest("from");
   suggest("to");
 });
