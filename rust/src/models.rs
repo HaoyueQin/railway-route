@@ -70,6 +70,10 @@ pub struct SearchRequest {
     pub match_mode: String,          // "exact" | "fuzzy"
     pub from_mode: Option<String>,   // None = 跟随 match_mode
     pub to_mode: Option<String>,
+    /// 多站精确模式：逗号分隔的站名列表（非空时优先于 from_query 扩散解析，
+    /// 每站精确单站解析后取并集；"任意数量车站"需求）
+    pub from_stations: Option<Vec<String>>,
+    pub to_stations: Option<Vec<String>>,
     pub search_profile: String,
     pub earliest_depart: i32,
     pub latest_depart: i32,
@@ -90,6 +94,8 @@ impl SearchRequest {
             match_mode: "fuzzy".into(),
             from_mode: None,
             to_mode: None,
+            from_stations: None,
+            to_stations: None,
             search_profile: profile.to_string(),
             earliest_depart: 0,
             latest_depart: 2880,

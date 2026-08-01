@@ -479,3 +479,23 @@ body.app-mode .resize-handle{display:block}
 @media(max-width:640px){
   .set-grid{grid-template-columns:1fr}
 }
+
+/* ── 站点选择器（全部站/自定义多选/仅本站）── */
+.st-picker{margin-top:8px;background:var(--glass-4);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--glass-edge);border-radius:var(--r-md);box-shadow:var(--shadow-mat);
+  padding:10px 12px;animation:heroIn .22s cubic-bezier(.2,.7,.3,1) both}
+.st-picker[hidden]{display:none}
+.st-picker .st-mode{width:100%;display:flex}
+.st-picker .st-mode .seg-btn{flex:1;text-align:center;font-size:.76rem;padding:6px 4px}
+.st-multi{margin-top:9px;display:flex;flex-direction:column;gap:8px}
+.st-multi[hidden]{display:none}
+.st-search{font-size:.84rem;padding:8px 12px}
+.st-list{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;
+  border:1px solid var(--line);border-radius:10px;padding:5px;background:var(--field-bg)}
+.st-item{display:flex;align-items:center;gap:8px;padding:5px 9px;border-radius:8px;
+  font-size:.8rem;color:var(--ink-2);cursor:pointer;transition:background .14s}
+.st-item:hover{background:var(--accent-soft)}
+.st-item.sel{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.st-item input{accent-color:var(--accent);width:14px;height:14px;flex:none}
+.st-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.st-sum{font-size:.76rem;font-weight:700;color:var(--accent)}

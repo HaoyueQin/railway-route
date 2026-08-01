@@ -9,7 +9,23 @@
 //! 对拍时两侧按规范化 route key 排序后逐项对比。
 
 use crate::graph::Graph;
-use crate::matcher::{resolve_city_code, resolve_station_set, MatcherData};
+use crate::matcher::{resolve_city_code, resolve_single, resolve_station_set, MatcherData};
+
+/// 多站精确解析：每站 resolve_single（精确单站），保序去重取并集。
+fn resolve_multi(
+    graph: &Graph,
+    matcher: &MatcherData,
+    stations: &[String],
+) -> Result<Vec<String>, String> {
+    let mut names: Vec<String> = Vec::new();
+    for s in stations {
+        let name = resolve_single(graph, matcher, s)?;
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
 use crate::models::{
     InterstationTransferSegment, PathSegment, RouteResult, SearchRequest, SearchResponse,
     TrainSegment,
@@ -804,11 +820,22 @@ pub fn search(
     let settings = crate::models::profile_settings(&request.search_profile);
     let timeout = request.timeout_seconds.min(settings.default_timeout_seconds);
 
-    // ── 解析起终点集合（每端可独立 exact/fuzzy）──
-    let from_mode = request.from_mode.as_deref().unwrap_or(&request.match_mode);
-    let to_mode = request.to_mode.as_deref().unwrap_or(&request.match_mode);
-    let source_names = resolve_station_set(graph, matcher, &request.from_query, from_mode)?;
-    let target_names = resolve_station_set(graph, matcher, &request.to_query, to_mode)?;
+    // ── 解析起终点集合（每端可独立 exact/fuzzy；
+    //    多站精确：from_stations/to_stations 非空时逐站精确解析取并集）──
+    let source_names = match &request.from_stations {
+        Some(list) => resolve_multi(graph, matcher, list)?,
+        None => {
+            let from_mode = request.from_mode.as_deref().unwrap_or(&request.match_mode);
+            resolve_station_set(graph, matcher, &request.from_query, from_mode)?
+        }
+    };
+    let target_names = match &request.to_stations {
+        Some(list) => resolve_multi(graph, matcher, list)?,
+        None => {
+            let to_mode = request.to_mode.as_deref().unwrap_or(&request.match_mode);
+            resolve_station_set(graph, matcher, &request.to_query, to_mode)?
+        }
+    };
     let source_set: HashSet<usize> = source_names
         .iter()
         .filter_map(|n| graph.station_to_idx.get(n).copied())

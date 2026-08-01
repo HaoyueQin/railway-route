@@ -121,6 +121,10 @@ pub fn build_search_request(params: &HashMap<String, String>) -> Result<SearchRe
         }
     }
 
+    // 多站精确模式：逗号分隔的站名（北京南,北京西,北京丰台）→ 每站精确解析取并集
+    let from_stations = multi_stations(&from_q, "出发站")?;
+    let to_stations = multi_stations(&to_q, "目的站")?;
+
     let profile = get(&["search_profile"]);
     let profile = if profile.is_empty() { "balanced".to_string() } else { profile };
     if !["fast", "balanced", "thorough", "complete"].contains(&profile.as_str()) {
@@ -147,6 +151,8 @@ pub fn build_search_request(params: &HashMap<String, String>) -> Result<SearchRe
         match_mode,
         from_mode: if from_mode.is_empty() { None } else { Some(from_mode) },
         to_mode: if to_mode.is_empty() { None } else { Some(to_mode) },
+        from_stations,
+        to_stations,
         search_profile: profile,
         earliest_depart: dep_after,
         latest_depart: dep_before,
@@ -158,4 +164,23 @@ pub fn build_search_request(params: &HashMap<String, String>) -> Result<SearchRe
         transfer_city_code: if transfer_city.is_empty() { None } else { Some(transfer_city) },
         timeout_seconds: timeout as u64,
     })
+}
+
+/// 逗号分隔多站解析：>1 段视为多站（每站精确）；单段返回 None。
+fn multi_stations(q: &str, label: &str) -> Result<Option<Vec<String>>, ValidationError> {
+    let parts: Vec<String> = q
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.len() <= 1 {
+        return Ok(None);
+    }
+    if parts.len() > 50 {
+        return Err(ValidationError {
+            code: "TOO_MANY_STATIONS".into(),
+            message: format!("{label}最多 50 个"),
+        });
+    }
+    Ok(Some(parts))
 }

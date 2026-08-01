@@ -174,15 +174,20 @@ pub fn api_search(
     (200, payload)
 }
 
-/// 处理 /api/match（对齐 APIHandler._match：前 15 个建议）。
+/// 处理 /api/match（对齐 APIHandler._match：默认前 15 个建议，limit 可放大）。
 pub fn api_match(
     graph: &Graph,
     matcher: &MatcherData,
     query: &HashMap<String, String>,
 ) -> (u16, Json) {
     let q = query.get("q").cloned().unwrap_or_default();
+    let limit = query
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .map(|n| n.clamp(1, 500))
+        .unwrap_or(15);
     let matches = fuzzy_match(graph, matcher, &q);
-    let names: Vec<Json> = matches.iter().take(15).map(|(_, n)| Json::String(n.clone())).collect();
+    let names: Vec<Json> = matches.iter().take(limit).map(|(_, n)| Json::String(n.clone())).collect();
     (
         200,
         Json::Object(

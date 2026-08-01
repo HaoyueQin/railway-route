@@ -49,6 +49,12 @@ SEARCH_CASES = [
     dict(to="上海"),
     dict(from_="北京南", to="上海虹桥", dep_after="25:00"),
     dict(from_="东莞", to="深圳", match_mode="exact"),
+    # 多站精确（逗号分隔）
+    dict(from_="北京南,北京西,北京丰台", to="新县"),
+    dict(from_="北京南", to="上海虹桥,上海南"),
+    dict(from_="曲阜东,兖州", to="泰山"),
+    dict(from_="甲站,乙站", to="上海"),  # 不存在的站 → 错误路径
+    dict(from_=",".join(f"站{i}" for i in range(51)), to="上海"),  # 超限 → 400
 ]
 
 MATCH_CASES = ["北京", "上海虹桥", "怀柔", "xinzheng", "乌鲁木齐"]

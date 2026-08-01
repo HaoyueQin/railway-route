@@ -1,3 +1,6 @@
+function isTauriEnv() {
+  return !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+}
 /* ═══════════════════════════════════════════════════════
    铁路出行路径规划 — 前端行为（搜索/渲染/排序/筛选/下拉/动效）
    ═══════════════════════════════════════════════════════ */
@@ -112,14 +115,11 @@ document.querySelectorAll("#dd-search-profile .seg-btn").forEach(btn => {
   });
 });
 
-// ── 桌面应用模式：自绘标题栏（pywebview / Tauri frameless 窗口）──
+// ── 桌面应用模式：自绘标题栏（pywebview frameless 窗口）──
 // 三重保障确保标题栏一定显示：
 //   1) JS 桥已就绪（window.pywebview 立即可用）
 //   2) pywebviewready 事件（桥注入晚于页面脚本时的标准时序）
 //   3) 打包 URL 显式携带 ?app=1（run_app 加载时附加，兜底）
-function isTauriEnv() {
-  return !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
-}
 function initAppMode() {
   if (document.body.classList.contains("app-mode")) return;
   document.body.classList.add("app-mode");
@@ -400,70 +400,67 @@ function createWheel(host, kind, initValue, onValue) {
   };
 }
 
-// 统一的"时:分"选择器：外壳形似输入框（time-pick），点击就地展开滚轮对。
-// 时间约束与换乘设置共用同一种形式、同一套滚轮组件（应用内滚轮形式唯一）。
-// opts: { h, m, clearable, onPaint }  onPaint(minutesOrNull)
-function initTimePick(id, opts) {
+// 换乘设置的"时:分"滚轮对（同站/异站）
+function initWheel(rowId, key, onChange) {
+  const row = $id(rowId);
+  row.innerHTML = "";
+  const onSel = (h, m) => {
+    _wheelState[key] = { h, m };
+    _form[key === "same" ? "sameMin" : "interMin"] = h * 60 + m;
+    row.querySelectorAll(".wheel").forEach(w => {
+      const kind = w.dataset.kind;
+      const v = kind === "h" ? h : m;
+      w.querySelectorAll(".wheel-item").forEach(it => it.classList.toggle("sel", +it.dataset.v === v));
+    });
+    if (onChange) onChange(h, m);
+  };
+  const hW = createWheel(row, "h", _wheelState[key].h, v => onSel(v, _wheelState[key].m));
+  const unitH = document.createElement("span"); unitH.className = "wheel-unit"; unitH.textContent = t("wheel.h");
+  const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
+  const mW = createWheel(row, "m", _wheelState[key].m, v => onSel(_wheelState[key].h, v));
+  const unitM = document.createElement("span"); unitM.className = "wheel-unit"; unitM.textContent = t("wheel.m");
+  row.appendChild(unitH); row.appendChild(colon); row.appendChild(unitM);
+  void hW; void mW;
+}
+
+initWheel("same-wheel", "same");
+initWheel("inter-wheel", "inter");
+
+// 时间约束选择器：外壳形似输入框，点击弹出滚轮面板（与换乘设置同款滚轮）
+function initTimePicker(id, key) {
   const el = $id(id);
   const valEl = el.querySelector(".tp-val");
   const pop = el.querySelector(".tp-pop");
   const row = pop.querySelector(".wheel-row");
-  const clearBtn = pop.querySelector(".tp-clear");
-  let h = opts.h || 0, m = opts.m || 0;
-  let empty = opts.clearable && opts.h === undefined;
+  let h = 0, m = 0;
   const paint = () => {
+    const empty = valEl.dataset.empty === "1";
     valEl.textContent = empty ? "--:--" : String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
     valEl.classList.toggle("tp-set", !empty);
-    if (opts.onPaint) opts.onPaint(empty ? null : h * 60 + m);
+    _form.times[key] = empty ? null : h * 60 + m;
   };
   const setPop = open => {
     pop.classList.toggle("open", open);
     el.classList.toggle("open", open);
     el.setAttribute("aria-expanded", String(open));
   };
-  createWheel(row, "h", h, v => { h = v; empty = false; paint(); });
+  createWheel(row, "h", h, v => { h = v; valEl.dataset.empty = "0"; paint(); });
   const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
-  createWheel(row, "m", m, v => { m = v; empty = false; paint(); });
+  createWheel(row, "m", m, v => { m = v; valEl.dataset.empty = "0"; paint(); });
   row.appendChild(colon);
-  if (clearBtn) {
-    clearBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      empty = true;
-      paint();
-      setPop(false);
-    });
-  }
+  pop.querySelector(".tp-clear").addEventListener("click", e => {
+    e.stopPropagation();
+    valEl.dataset.empty = "1";
+    paint();
+    setPop(false);
+  });
   el.addEventListener("click", e => {
     e.stopPropagation();
     setPop(!pop.classList.contains("open"));
   });
-  paint();
 }
-
-// 时间约束（可清除，空 = 全天不限）
-[["dep-after", "depAfter"], ["dep-before", "depBefore"],
- ["arr-after", "arrAfter"], ["arr-before", "arrBefore"]].forEach(([id, key]) => {
-  initTimePick(id, { clearable: true, onPaint: v => { _form.times[key] = v; } });
-});
-
-// 换乘设置（同站/异站）：与时间约束同形式同组件
-initTimePick("same-pick", {
-  h: _wheelState.same.h, m: _wheelState.same.m,
-  onPaint: v => {
-    if (v !== null) {
-      _form.sameMin = v;
-      _wheelState.same = { h: Math.floor(v / 60), m: v % 60 };
-    }
-  },
-});
-initTimePick("inter-pick", {
-  h: _wheelState.inter.h, m: _wheelState.inter.m,
-  onPaint: v => {
-    if (v !== null) {
-      _form.interMin = v;
-      _wheelState.inter = { h: Math.floor(v / 60), m: v % 60 };
-    }
-  },
+["dep-after", "dep-before", "arr-after", "arr-before"].forEach((id, i) => {
+  initTimePicker(id, ["depAfter", "depBefore", "arrAfter", "arrBefore"][i]);
 });
 document.addEventListener("click", () => {
   document.querySelectorAll(".time-pick.open").forEach(el => {
@@ -486,6 +483,7 @@ async function suggest(which) {
   const el = $id(which + "-sugg");
   el.innerHTML = "";
   if (q.length < 1) return;
+  if (q.includes(",")) return;  // 多站模式（逗号分隔）不做单站建议
   let d;
   try {
     d = await fetch("/api/match?q=" + encodeURIComponent(q)).then(r => r.json());
@@ -501,24 +499,120 @@ async function suggest(which) {
 $id("from").addEventListener("input", () => suggest("from"));
 $id("to").addEventListener("input", () => suggest("to"));
 
-// ── 每端独立匹配模式：全部站(fuzzy) / 本站(exact) ──
+// ── 每端站点模式：全部站(fuzzy) / 自定义多选(multi) / 仅本站(exact) ──
+const _st = { from: [], to: [] };  // 多选站列表（按端）
+
 function setEndMode(key, mode) {
   _form[key] = mode;
   const btn = $id(key.replace("Mode", "-mode"));
-  btn.textContent = mode === "exact" ? t("search.this") : t("search.all");
-  btn.classList.toggle("on", mode === "exact");
+  if (mode === "multi") {
+    const n = (_st[key === "fromMode" ? "from" : "to"] || []).length;
+    btn.textContent = t("st.count", { n: n });
+    btn.classList.add("on");
+  } else {
+    btn.textContent = mode === "exact" ? t("search.this") : t("search.all");
+    btn.classList.toggle("on", mode === "exact");
+  }
   btn.title = mode === "exact" ? t("search.modeThis") : t("search.modeAll");
 }
-$id("from-mode").addEventListener("click", () => setEndMode("fromMode", _form.fromMode === "exact" ? "fuzzy" : "exact"));
-$id("to-mode").addEventListener("click", () => setEndMode("toMode", _form.toMode === "exact" ? "fuzzy" : "exact"));
+
+// 站点选择器（全部站/自定义多选/仅本站）：点击模式按钮弹出
+function openStationPicker(which) {
+  const picker = $id(which + "-picker");
+  const other = $id(which === "from" ? "to-picker" : "from-picker");
+  other.hidden = true;
+  picker.hidden = !picker.hidden;
+  if (!picker.hidden) {
+    const mode = _form[which === "from" ? "fromMode" : "toMode"] || "fuzzy";
+    picker.querySelectorAll(".st-mode .seg-btn").forEach(b =>
+      b.classList.toggle("sel", b.dataset.v === mode));
+    const multi = picker.querySelector(".st-multi");
+    multi.hidden = mode !== "multi";
+    if (mode === "multi") {
+      const search = picker.querySelector(".st-search");
+      search.value = $id(which).value;
+      loadStationCandidates(which, search.value);
+    }
+  }
+}
+
+async function loadStationCandidates(which, q) {
+  const picker = $id(which + "-picker");
+  const list = picker.querySelector(".st-list");
+  const selected = _st[which];
+  list.innerHTML = "";
+  if (!q.trim()) return;
+  let d;
+  try {
+    d = await fetch("/api/match?q=" + encodeURIComponent(q) + "&limit=200").then(r => r.json());
+  } catch (e) { return; }
+  (d.matches || []).forEach(name => {
+    const row = document.createElement("label");
+    row.className = "st-item" + (selected.includes(name) ? " sel" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected.includes(name);
+    cb.addEventListener("change", () => {
+      const i = selected.indexOf(name);
+      if (cb.checked && i < 0) selected.push(name);
+      if (!cb.checked && i >= 0) selected.splice(i, 1);
+      row.classList.toggle("sel", cb.checked);
+      updateStSum(which);
+    });
+    const span = document.createElement("span");
+    span.textContent = name;
+    row.appendChild(cb);
+    row.appendChild(span);
+    list.appendChild(row);
+  });
+  updateStSum(which);
+}
+
+function updateStSum(which) {
+  const picker = $id(which + "-picker");
+  picker.querySelector(".st-sum").textContent =
+    _st[which].length ? t("st.count", { n: _st[which].length }) : "";
+}
+
+function bindStationPicker(which) {
+  const picker = $id(which + "-picker");
+  picker.querySelectorAll(".st-mode .seg-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.v;
+      picker.querySelectorAll(".st-mode .seg-btn").forEach(b =>
+        b.classList.toggle("sel", b === btn));
+      const multi = picker.querySelector(".st-multi");
+      multi.hidden = mode !== "multi";
+      if (mode === "multi") {
+        loadStationCandidates(which, picker.querySelector(".st-search").value || $id(which).value);
+      }
+      setEndMode(which + "Mode", mode);
+    });
+  });
+  picker.querySelector(".st-search").addEventListener("input", e =>
+    loadStationCandidates(which, e.target.value));
+  picker.querySelector(".st-ok").addEventListener("click", () => {
+    picker.hidden = true;
+    if (_form[which + "Mode"] === "multi") {
+      setEndMode(which + "Mode", "multi");
+      // 已选站回填到主输入框（逗号分隔，与后端多站参数一致）
+      if (_st[which].length) $id(which).value = _st[which].join(",");
+    }
+  });
+}
+bindStationPicker("from");
+bindStationPicker("to");
+$id("from-mode").addEventListener("click", () => openStationPicker("from"));
+$id("to-mode").addEventListener("click", () => openStationPicker("to"));
 
 // ── 搜索 ──
 async function search() {
   const from = $id("from").value.trim(), to = $id("to").value.trim();
   if (!from || !to) return;
   const p = new URLSearchParams({ from, to, match_mode: _form.matchMode, search_profile: _form.profile });
-  if (_form.fromMode) p.set("from_mode", _form.fromMode);
-  if (_form.toMode) p.set("to_mode", _form.toMode);
+  // 多站模式（multi）不发送 from_mode：逗号分隔的 from 参数即多站精确语义
+  if (_form.fromMode && _form.fromMode !== "multi") p.set("from_mode", _form.fromMode);
+  if (_form.toMode && _form.toMode !== "multi") p.set("to_mode", _form.toMode);
   // 时间约束（滚轮选择器；null = 不限）
   const times = [
     ["depAfter", "dep_after"], ["depBefore", "dep_before"],
@@ -861,11 +955,16 @@ $id("adv-toggle").addEventListener("click", () => {
   btn.setAttribute("aria-expanded", String(open));
 });
 
-// 交换起终点
+// 交换起终点（含多站列表与模式）
 $id("btn-swap").addEventListener("click", () => {
   const f = $id("from").value, t = $id("to").value;
   $id("from").value = t;
   $id("to").value = f;
+  const sf = _st.from, st = _st.to;
+  _st.from = st; _st.to = sf;
+  const mf = _form.fromMode, mt = _form.toMode;
+  if (mf) setEndMode("fromMode", mf);
+  if (mt) setEndMode("toMode", mt);
   suggest("from");
   suggest("to");
 });
@@ -953,6 +1052,8 @@ document.querySelectorAll("[data-lang-toggle]").forEach(btn => {
     applyLang();
     if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
     if (_form.toMode) setEndMode("toMode", _form.toMode);
+    initWheel("same-wheel", "same");
+    initWheel("inter-wheel", "inter");
     if (_routesData) render();
   });
 });
@@ -1122,6 +1223,8 @@ function initUpdateUI() {
 
 // 语言切换时重建动态文案（滚轮单位/端点按钮/结果区）
 registerLang(() => {
+  initWheel("same-wheel", "same");
+  initWheel("inter-wheel", "inter");
   if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
   if (_form.toMode) setEndMode("toMode", _form.toMode);
   if (_routesData) render();
