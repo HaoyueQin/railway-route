@@ -1,3 +1,15 @@
+// ── API 抽象层（M6 零端口）：
+//   pywebview → js_api 桥；浏览器 → fetch（开发/调试）
+async function api(path, params) {
+  // 参数统一转字符串（invoke 的 HashMap<String,String> 与 URLSearchParams 都要求）
+  const q = {};
+  for (const [k, v] of Object.entries(params || {})) q[k] = String(v);
+  if (window.pywebview && window.pywebview.api && window.pywebview.api["api_" + path]) {
+    return window.pywebview.api["api_" + path](q);
+  }
+  const qs = new URLSearchParams(q).toString();
+  return fetch("/api/" + path + (qs ? "?" + qs : "")).then(r => r.json());
+}
 /* ═══════════════════════════════════════════════════════
    铁路出行路径规划 — 前端行为（搜索/渲染/排序/筛选/下拉/动效）
    ═══════════════════════════════════════════════════════ */
@@ -125,6 +137,8 @@ function initAppMode() {
   const min = document.getElementById("tb-min");
   const maxBtn = document.getElementById("tb-max");
   const close = document.getElementById("tb-close");
+
+  // ── pywebview 窗口控制 ──
   if (min) min.addEventListener("click", () => { try { window.pywebview.api.minimize(); } catch (e) {} });
   if (close) close.addEventListener("click", () => { try { window.pywebview.api.close(); } catch (e) {} });
   // 最大化/还原：点击切换图标；双击标题栏拖动区也可切换（Windows 习惯）。
@@ -314,67 +328,70 @@ function createWheel(host, kind, initValue, onValue) {
   };
 }
 
-// 换乘设置的"时:分"滚轮对（同站/异站）
-function initWheel(rowId, key, onChange) {
-  const row = $id(rowId);
-  row.innerHTML = "";
-  const onSel = (h, m) => {
-    _wheelState[key] = { h, m };
-    _form[key === "same" ? "sameMin" : "interMin"] = h * 60 + m;
-    row.querySelectorAll(".wheel").forEach(w => {
-      const kind = w.dataset.kind;
-      const v = kind === "h" ? h : m;
-      w.querySelectorAll(".wheel-item").forEach(it => it.classList.toggle("sel", +it.dataset.v === v));
-    });
-    if (onChange) onChange(h, m);
-  };
-  const hW = createWheel(row, "h", _wheelState[key].h, v => onSel(v, _wheelState[key].m));
-  const unitH = document.createElement("span"); unitH.className = "wheel-unit"; unitH.textContent = t("wheel.h");
-  const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
-  const mW = createWheel(row, "m", _wheelState[key].m, v => onSel(_wheelState[key].h, v));
-  const unitM = document.createElement("span"); unitM.className = "wheel-unit"; unitM.textContent = t("wheel.m");
-  row.appendChild(unitH); row.appendChild(colon); row.appendChild(unitM);
-  void hW; void mW;
-}
-
-initWheel("same-wheel", "same");
-initWheel("inter-wheel", "inter");
-
-// 时间约束选择器：外壳形似输入框，点击弹出滚轮面板（与换乘设置同款滚轮）
-function initTimePicker(id, key) {
+// 统一的"时:分"选择器（时间约束与换乘设置共用同一种形式同一种组件）：
+// 外壳形似输入框（time-pick），点击就地展开滚轮对（时:分并排居中）。
+// opts: { h, m, clearable, onPaint }  onPaint(minutesOrNull)
+function initTimePick(id, opts) {
   const el = $id(id);
   const valEl = el.querySelector(".tp-val");
   const pop = el.querySelector(".tp-pop");
   const row = pop.querySelector(".wheel-row");
-  let h = 0, m = 0;
+  const clearBtn = pop.querySelector(".tp-clear");
+  let h = opts.h || 0, m = opts.m || 0;
+  let empty = opts.clearable && opts.h === undefined;
   const paint = () => {
-    const empty = valEl.dataset.empty === "1";
     valEl.textContent = empty ? "--:--" : String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
     valEl.classList.toggle("tp-set", !empty);
-    _form.times[key] = empty ? null : h * 60 + m;
+    if (opts.onPaint) opts.onPaint(empty ? null : h * 60 + m);
   };
   const setPop = open => {
     pop.classList.toggle("open", open);
     el.classList.toggle("open", open);
     el.setAttribute("aria-expanded", String(open));
   };
-  createWheel(row, "h", h, v => { h = v; valEl.dataset.empty = "0"; paint(); });
+  createWheel(row, "h", h, v => { h = v; empty = false; paint(); });
   const colon = document.createElement("span"); colon.className = "wheel-colon"; colon.textContent = ":";
-  createWheel(row, "m", m, v => { m = v; valEl.dataset.empty = "0"; paint(); });
+  createWheel(row, "m", m, v => { m = v; empty = false; paint(); });
   row.appendChild(colon);
-  pop.querySelector(".tp-clear").addEventListener("click", e => {
-    e.stopPropagation();
-    valEl.dataset.empty = "1";
-    paint();
-    setPop(false);
-  });
+  if (clearBtn) {
+    clearBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      empty = true;
+      paint();
+      setPop(false);
+    });
+  }
   el.addEventListener("click", e => {
     e.stopPropagation();
     setPop(!pop.classList.contains("open"));
   });
+  paint();
 }
-["dep-after", "dep-before", "arr-after", "arr-before"].forEach((id, i) => {
-  initTimePicker(id, ["depAfter", "depBefore", "arrAfter", "arrBefore"][i]);
+
+// 时间约束（可清除，空 = 全天不限）
+[["dep-after", "depAfter"], ["dep-before", "depBefore"],
+ ["arr-after", "arrAfter"], ["arr-before", "arrBefore"]].forEach(([id, key]) => {
+  initTimePick(id, { clearable: true, onPaint: v => { _form.times[key] = v; } });
+});
+
+// 换乘设置（同站/异站）：与时间约束同形式同组件
+initTimePick("same-pick", {
+  h: _wheelState.same.h, m: _wheelState.same.m,
+  onPaint: v => {
+    if (v !== null) {
+      _form.sameMin = v;
+      _wheelState.same = { h: Math.floor(v / 60), m: v % 60 };
+    }
+  },
+});
+initTimePick("inter-pick", {
+  h: _wheelState.inter.h, m: _wheelState.inter.m,
+  onPaint: v => {
+    if (v !== null) {
+      _form.interMin = v;
+      _wheelState.inter = { h: Math.floor(v / 60), m: v % 60 };
+    }
+  },
 });
 document.addEventListener("click", () => {
   document.querySelectorAll(".time-pick.open").forEach(el => {
@@ -400,7 +417,7 @@ async function suggest(which) {
   if (q.includes(",")) return;  // 多站模式（逗号分隔）不做单站建议
   let d;
   try {
-    d = await fetch("/api/match?q=" + encodeURIComponent(q)).then(r => r.json());
+    d = await api("match", { q: q });
   } catch (e) { return; }
   (d.matches || []).slice(0, 15).forEach(m => {
     const b = document.createElement("button");
@@ -458,7 +475,7 @@ async function loadStationCandidates(which, q) {
   if (!q.trim()) return;
   let d;
   try {
-    d = await fetch("/api/match?q=" + encodeURIComponent(q) + "&limit=200").then(r => r.json());
+    d = await api("match", { q: q, limit: 200 });
   } catch (e) { return; }
   (d.matches || []).forEach(name => {
     const row = document.createElement("label");
@@ -544,7 +561,7 @@ async function search() {
   $id("results").innerHTML = '<div class="empty search-loading"><span class="spinner" aria-hidden="true"></span>' + t("search.loading") + "</div>";
   let d;
   try {
-    d = await fetch("/api/search?" + p.toString()).then(r => r.json());
+    d = await api("search", Object.fromEntries(p));
   } catch (e) {
     $id("results").innerHTML = '<div class="empty">' + t("search.netErr") + "</div>";
     return;
@@ -630,11 +647,21 @@ function render() {
     }
     const more = e.target.closest(".tt-more");
     if (more) {
-      const holder = more.closest(".tt-card");
-      if (holder) {
-        holder.classList.toggle("full");
-        more.textContent = holder.classList.contains("full") ? t("tt.collapse") : t("tt.expand");
+      // 完整时刻表：在已显示的中间站基础上前后补齐（不重复整份）
+      const card = more.closest(".tt-card");
+      if (card) {
+        const open = !card.classList.contains("full");
+        card.classList.toggle("full", open);
+        more.textContent = open ? t("tt.collapse") : t("tt.expandN", { n: more.dataset.total });
+        card.querySelectorAll(".tt-prefix, .tt-suffix").forEach(el => { el.hidden = !open; });
       }
+      return;
+    }
+    const rc = e.target.closest(".rc");
+    if (rc) {
+      const open = !rc.classList.contains("expanded");
+      rc.classList.toggle("expanded", open);
+      if (open) ensureTimetable(rc);  // 展开时懒加载全程时刻表
       return;
     }
   });
@@ -677,11 +704,7 @@ function renderList() {
 
   const label = view === "direct" ? t("view.direct") : t("view.xfer");
   list.innerHTML = renderGroup(routes, label, view === "direct", 0, routes.length);
-  // 完全展开：卡片默认展开，时刻表懒加载
-  list.querySelectorAll(".rc").forEach(card => {
-    card.classList.add("expanded");
-    ensureTimetable(card);
-  });
+  // 卡片默认收起：点击卡片展开详情，展开时懒加载该卡全程时刻表
 }
 
 // ── 路线卡片分组（含入场动效 stagger）──
@@ -789,7 +812,7 @@ function buildTimetableSkeleton(r) {
 async function fetchTrain(code) {
   if (_trainCache.has(code)) return _trainCache.get(code);
   try {
-    const d = await fetch("/api/train?code=" + encodeURIComponent(code)).then(r => r.json());
+    const d = await api("train", { code: code });
     _trainCache.set(code, d);
     return d;
   } catch (e) {
@@ -815,18 +838,24 @@ function fillTimetable(card, data, fromName, toName) {
     body.innerHTML = '<table class="tt-tbl">' + stops.map(rowHtml).join("") + "</table>";
     return;
   }
-  // 区间：上车站上一站 → 下车站下一站（含始发/终到则从首/尾起）
+  // 区间：上车站上一站 → 下车站下一站（含始发/终到则从首/尾起）。
+  // 完整展开 = 在已显示的区间基础上前后补齐（前缀/后缀 tbody 默认隐藏），
+  // 不重复渲染整份时刻表。
   const startIdx = Math.max(0, fromIdx - 1);
   const endIdx = Math.min(stops.length - 1, toIdx + 1);
+  const prefixRows = stops.slice(0, startIdx).map(s => rowHtml(s));
   const segRows = stops.slice(startIdx, endIdx + 1).map((s, i) =>
     rowHtml(s, i + startIdx === fromIdx ? "hl-from" : i + startIdx === toIdx ? "hl-to" : ""));
-  // 完整时刻表（折叠）
-  const fullRows = stops.map((s, i) => rowHtml(s, i === fromIdx ? "hl-from" : i === toIdx ? "hl-to" : ""));
-  let h = '<table class="tt-tbl"><tr><th>' + t("tt.thStation") + "</th><th>" + t("tt.thArrive") + "</th><th>" + t("tt.thDepart") + "</th><th>" + t("tt.thStay") + "</th></tr>" + segRows.join("") + "</table>";
+  const suffixRows = stops.slice(endIdx + 1).map(s => rowHtml(s));
+  const th = "<tr><th>" + t("tt.thStation") + "</th><th>" + t("tt.thArrive") + "</th><th>" + t("tt.thDepart") + "</th><th>" + t("tt.thStay") + "</th></tr>";
+  let h = '<table class="tt-tbl">' + th
+    + '<tbody class="tt-prefix" hidden>' + prefixRows.join("") + "</tbody>"
+    + segRows.join("")
+    + '<tbody class="tt-suffix" hidden>' + suffixRows.join("") + "</tbody>"
+    + "</table>";
   if (stops.length > endIdx - startIdx + 1) {
-    h += '<button class="tt-more" type="button">' + t("tt.expandN", { n: stops.length }) + "</button>"
-      + '<div class="tt-full"><table class="tt-tbl"><tr><th>' + t("tt.thStation") + "</th><th>" + t("tt.thArrive") + "</th><th>" + t("tt.thDepart") + "</th><th>" + t("tt.thStay") + "</th></tr>"
-      + fullRows.join("") + "</table></div>";
+    h += '<button class="tt-more" type="button" data-total="' + stops.length + '">'
+      + t("tt.expandN", { n: stops.length }) + "</button>";
   }
   body.innerHTML = h;
 }
@@ -890,7 +919,7 @@ let _appVersion = "0.0.0";
 
 async function initAppVersion() {
   try {
-    const d = await fetch("/api/appinfo").then(r => r.json());
+    const d = await api("appinfo", {});
     if (d && d.version) _appVersion = d.version;
   } catch (e) {}
   syncSettingsUI();
@@ -966,8 +995,6 @@ document.querySelectorAll("[data-lang-toggle]").forEach(btn => {
     applyLang();
     if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
     if (_form.toMode) setEndMode("toMode", _form.toMode);
-    initWheel("same-wheel", "same");
-    initWheel("inter-wheel", "inter");
     if (_routesData) render();
   });
 });
@@ -1016,8 +1043,7 @@ const _updateUI = {
 };
 
 function hasUpdateBridge() {
-  return !!(window.pywebview && window.pywebview.api && window.pywebview.api.check_update)
-    || !!(window.__TAURI__ && window.__TAURI__.core);
+  return !!(window.pywebview && window.pywebview.api && window.pywebview.api.check_update);
 }
 
 function setUpdateMsg(text, cls) {
@@ -1036,8 +1062,6 @@ async function doCheckUpdate() {
     let r;
     if (window.pywebview && window.pywebview.api && window.pywebview.api.check_update) {
       r = await window.pywebview.api.check_update(s.proxyPort);
-    } else if (window.__TAURI__ && window.__TAURI__.core) {
-      r = await window.__TAURI__.core.invoke("check_update", { proxyPort: s.proxyPort });
     } else {
       setUpdateMsg(t("set.checkErr", { e: "browser mode" }), "err");
       return;
@@ -1066,9 +1090,6 @@ async function doDownload() {
     if (window.pywebview && window.pywebview.api && window.pywebview.api.download_update) {
       return window.pywebview.api.download_update(s.proxyPort);
     }
-    if (window.__TAURI__ && window.__TAURI__.core) {
-      return window.__TAURI__.core.invoke("download_update", { proxyPort: s.proxyPort });
-    }
     return Promise.reject(new Error("no bridge"));
   };
   _updateUI.dlBtn.hidden = true;
@@ -1080,8 +1101,6 @@ async function doDownload() {
       try {
         if (window.pywebview && window.pywebview.api && window.pywebview.api.get_download_progress) {
           p = await window.pywebview.api.get_download_progress();
-        } else if (window.__TAURI__ && window.__TAURI__.core) {
-          p = await window.__TAURI__.core.invoke("get_download_progress");
         }
       } catch (e) { p = { state: "err", message: String(e) }; }
       if (p.state === "done") {
@@ -1137,8 +1156,6 @@ function initUpdateUI() {
 
 // 语言切换时重建动态文案（滚轮单位/端点按钮/结果区）
 registerLang(() => {
-  initWheel("same-wheel", "same");
-  initWheel("inter-wheel", "inter");
   if (_form.fromMode) setEndMode("fromMode", _form.fromMode);
   if (_form.toMode) setEndMode("toMode", _form.toMode);
   if (_routesData) render();

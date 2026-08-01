@@ -342,7 +342,11 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
     print(f"\n  桌面应用: {url}（关闭窗口即退出）\n")
 
     class WindowApi:
-        """暴露给前端标题栏的窗口控制（仅窗口控制，不泄露其他能力）。"""
+        """窗口控制 + API 桥（graph/matcher 由 run_app 注入，直连后端零端口）。"""
+        def __init__(self, graph, matcher):
+            self.graph = graph
+            self.matcher = matcher
+
         def minimize(self):
             try:
                 webview.windows[0].minimize()
@@ -380,6 +384,78 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
                 webview.windows[0].destroy()
             except Exception:
                 pass
+
+        # ── API 桥（M6 零端口：前端 api() 在桌面环境直连后端，不走 HTTP）──
+        def api_search(self, params):
+            """与 /api/search 同契约：{routes, source_stations, ...} / {error:{code,message}}"""
+            return self._api_call("search", params)
+
+        def api_match(self, params):
+            return self._api_call("match", params)
+
+        def api_train(self, params):
+            return self._api_call("train", params)
+
+        def api_appinfo(self, params=None):
+            return {"name": "railway-route", "version": APP_VERSION}
+
+        def _api_call(self, kind, params):
+            import time as _t
+            t0 = _t.time()
+            try:
+                flat = {k: str(v) for k, v in (params or {}).items()}
+                if kind == "search":
+                    request = build_search_request(flat)
+                    response = csa_search(self.graph, request, self.matcher)
+                    scored = score_routes(list(response.routes))
+                    return {
+                        "routes": [typed_route_to_dict(r, s) for s, r in scored],
+                        "time": round(_t.time() - t0, 1),
+                        "source_stations": list(response.source_stations),
+                        "target_stations": list(response.target_stations),
+                        "complete": response.metadata.complete,
+                        "profile": response.metadata.profile,
+                        "scanned": response.metadata.scanned_connections,
+                        "generated": response.metadata.generated_states,
+                        "cached": False,
+                    }
+                if kind == "match":
+                    q = flat.get("q", "")
+                    limit = max(1, min(int(flat.get("limit", "15") or 15), 500))
+                    matches = fuzzy_match(q, self.graph, self.matcher)
+                    return {"matches": [m[1] for m in matches[:limit]]}
+                if kind == "train":
+                    code = flat.get("code", "").strip()
+                    stops = self.graph.train_stops.get(code)
+                    if not stops:
+                        return {"error": {"code": "NOT_FOUND", "message": "未找到车次 " + code}}
+                    return self._train_payload(code, stops)
+                return {"error": {"code": "INTERNAL_ERROR", "message": "未知 API: " + kind}}
+            except RequestValidationError as ve:
+                return {"error": {"code": ve.code, "message": ve.message}}
+            except ValueError as e:
+                msg = str(e)
+                if msg.startswith("未找到匹配的车站"):
+                    return {"error": {"code": "STATION_NOT_FOUND", "message": msg}}
+                return {"error": {"code": "INTERNAL_ERROR", "message": msg}}
+            except Exception as e:  # 兜底：桥异常不崩溃窗口
+                return {"error": {"code": "INTERNAL_ERROR", "message": str(e)}}
+
+        def _train_payload(self, code, stops):
+            idx_to_station = self.graph.idx_to_station
+
+            def fmt(m):
+                if m < 0:
+                    return None
+                return {"minutes": m, "time": "%02d:%02d" % ((m // 60) % 24, m % 60),
+                        "day": m // 1440, "display": "%02d:%02d" % ((m // 60) % 24, m % 60)
+                        + (("+" + str(m // 1440)) if m >= 1440 else "")}
+
+            return {"code": code, "stops": [
+                {"station": idx_to_station[s[0]], "depart": fmt(s[1]), "arrive": fmt(s[2]),
+                 "seq": s[3], "distance": s[4]}
+                for s in stops
+            ]}
 
         # ── 检查更新（GitHub Releases API；proxy_port 空 = 系统代理）──
         def check_update(self, proxy_port=""):
@@ -438,7 +514,7 @@ def run_app(graph, matcher, port=8000, title="铁路出行路径规划"):
             easy_drag=False,         # 关闭整窗拖拽：仅前端 titlebar（-webkit-app-region: drag）可拖动
             resizable=True,          # 配合前端边缘热区实现手动调整大小
             background_color="#e0e7ff",
-            js_api=WindowApi(),
+            js_api=WindowApi(graph, matcher),
         )
         webview.start()
     except Exception as e:

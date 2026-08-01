@@ -14,7 +14,7 @@
 
 <!-- 桌面应用自绘标题栏（仅桌面窗口环境显示，浏览器模式隐藏） -->
 <div id="titlebar" hidden>
-  <div class="tb-brand">
+  <div class="tb-brand" data-tauri-drag-region>
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 9h14M9 3v6M15 3v6M8 17l-2 4M16 17l2 4"/></svg>
     <span class="tb-title" data-i18n="app.title">铁路出行路径规划</span>
   </div>
@@ -165,9 +165,15 @@
           </div>
           <div class="xfer-grid">
             <div class="fld"><label class="fld-lbl" data-i18n="adv.same">同站换乘</label>
-              <div class="wheel-row" id="same-wheel"></div></div>
+              <div class="time-pick" id="same-pick" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">00:15</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div></div>
+              </div></div>
             <div class="fld"><label class="fld-lbl" data-i18n="adv.inter">异站换乘</label>
-              <div class="wheel-row" id="inter-wheel"></div></div>
+              <div class="time-pick" id="inter-pick" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+                <div class="tp-head"><span class="tp-val">01:00</span><span class="tp-caret" aria-hidden="true"></span></div>
+                <div class="tp-pop"><div class="wheel-row"></div></div>
+              </div></div>
             <div class="xfer-side">
               <div class="fld"><label class="fld-lbl" data-i18n="adv.maxXfer">最大换乘</label>
                 <div class="sr"><input type="range" id="max-rng" min="0" max="10" value="3"><input type="number" id="max-num" min="0" max="10" value="3"></div></div>

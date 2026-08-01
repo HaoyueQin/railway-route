@@ -151,7 +151,7 @@ class WebHtmlContractTest(unittest.TestCase):
             "dd-search-profile",
             "adv-toggle", "adv-panel",
             "dep-after", "dep-before", "arr-after", "arr-before",
-            "same-wheel", "inter-wheel",
+            "same-pick", "inter-pick",
             "max-rng", "max-num", "xfer-at",
             "btn-search", "results",
         ]:
