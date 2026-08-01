@@ -345,38 +345,81 @@ fn find_app_resources() -> (std::path::PathBuf, std::path::PathBuf) {
     std::process::exit(1);
 }
 
-fn run_tauri(csv: &Path, js: &Path, web_dir: &Path) {
+/// Tauri 应用共享数据（搜索/匹配直接内存调用，零 HTTP 零端口）。
+pub struct AppData {
+    pub graph: Graph,
+    pub matcher: matcher::MatcherData,
+}
+
+/// 自研 Json → serde_json（IPC 返回给前端）。
+fn json_to_serde(j: &Json) -> serde_json::Value {
+    match j {
+        Json::Null => serde_json::Value::Null,
+        Json::Bool(b) => serde_json::Value::Bool(*b),
+        Json::Number(n) => serde_json::Value::from(*n),
+        Json::String(s) => serde_json::Value::String(s.clone()),
+        Json::Array(a) => serde_json::Value::Array(a.iter().map(json_to_serde).collect()),
+        Json::Object(o) => serde_json::Value::Object(
+            o.iter().map(|(k, v)| (k.clone(), json_to_serde(v))).collect(),
+        ),
+    }
+}
+
+/// 包装 api.rs 的 HTTP 处理器为 Tauri command（参数表同 HTTP query，响应同契约）。
+fn api_command<F>(f: F) -> serde_json::Value
+where
+    F: FnOnce() -> (u16, Json),
+{
+    let (_, body) = f();
+    json_to_serde(&body)
+}
+
+#[tauri::command]
+fn api_search(state: tauri::State<'_, AppData>, params: std::collections::HashMap<String, String>) -> serde_json::Value {
+    api_command(|| api::api_search(&state.graph, &state.matcher, &params))
+}
+
+#[tauri::command]
+fn api_match(state: tauri::State<'_, AppData>, params: std::collections::HashMap<String, String>) -> serde_json::Value {
+    api_command(|| api::api_match(&state.graph, &state.matcher, &params))
+}
+
+#[tauri::command]
+fn api_train(state: tauri::State<'_, AppData>, params: std::collections::HashMap<String, String>) -> serde_json::Value {
+    api_command(|| api::api_train(&state.graph, &params))
+}
+
+#[tauri::command]
+fn api_appinfo() -> serde_json::Value {
+    serde_json::json!({ "name": "railway-route", "version": env!("CARGO_PKG_VERSION") })
+}
+
+fn run_tauri(csv: &Path, js: &Path, _web_dir: &Path) {
     let mut g = Graph::new();
     g.build(csv, js).expect("构建图失败");
     let matcher = matcher::build_matcher(&g, js).expect("构建 matcher 失败");
-
-    // HTTP 服务线程：端口绑定成功即通过回调通知主线程（serve 阻塞在请求循环）
-    let (tx, rx) = std::sync::mpsc::channel::<u16>();
     let n_stations = g.station_count();
     let n_trains = g.train_stops.len();
-    let web_owned = web_dir.to_path_buf();
-    std::thread::spawn(move || {
-        http::serve_with_cb(&g, &matcher, &web_owned, 8800, move |p| {
-            let _ = tx.send(p);
-        })
-        .expect("HTTP 服务失败");
-    });
-    let port = rx.recv().expect("获取 HTTP 端口失败");
-    println!("数据加载完成（{n_stations} 站 / {n_trains} 车次），Tauri 窗口 → http://127.0.0.1:{port}");
+    println!("数据加载完成（{n_stations} 站 / {n_trains} 车次），Tauri 窗口（内置资源，零端口）");
 
     tauri::Builder::default()
+        .manage(AppData { graph: g, matcher })
         .manage(updater::UpdaterState::new())
         .invoke_handler(tauri::generate_handler![
+            api_search,
+            api_match,
+            api_train,
+            api_appinfo,
             updater::check_update,
             updater::download_update,
             updater::get_download_progress,
         ])
         .setup(move |app| {
-            let url = format!("http://127.0.0.1:{port}/?app=1");
+            // 内置资源（frontendDist ../web 打包进 exe），不加载外部 URL
             let _win = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
-                tauri::WebviewUrl::External(url.parse().expect("非法 URL")),
+                tauri::WebviewUrl::default(),
             )
                 .title("铁路出行路径规划")
                 .inner_size(1280.0, 880.0)

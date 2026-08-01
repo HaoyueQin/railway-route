@@ -240,15 +240,15 @@ body.app-mode .resize-handle{display:block}
    不用弹出层：高级选项容器 overflow:hidden 会裁剪 absolute 面板（分钟滚轮不可点），
    就地展开不受影响，且滚动跟随内容。 */
 .time-pick{position:relative;display:flex;flex-direction:column;min-width:118px;cursor:pointer;user-select:none}
-.tp-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding:11px 13px;font-size:.95rem;color:var(--ink);background:var(--glass-2);
+.tp-head{position:relative;display:flex;align-items:center;justify-content:center;
+  padding:11px 32px 11px 13px;font-size:.95rem;color:var(--ink);background:var(--glass-2);
   border:1px solid var(--line);border-radius:var(--r-md);
   transition:border-color .22s,box-shadow .22s,border-radius .2s}
 .time-pick:hover .tp-head{border-color:rgba(var(--accent-rgb),.35)}
 .time-pick.open .tp-head{border-color:var(--accent);box-shadow:0 0 0 3.5px rgba(var(--accent-rgb),.13);border-radius:var(--r-md) var(--r-md) 0 0}
-.tp-val{flex:1;font-weight:600;letter-spacing:.5px;color:var(--ph)}
+.tp-val{font-weight:600;letter-spacing:.5px;color:var(--ph);text-align:center}
 .tp-val.tp-set{color:var(--ink)}
-.tp-caret{width:0;height:0;border-left:4.5px solid transparent;border-right:4.5px solid transparent;border-top:5.5px solid var(--secondary);transition:transform .25s cubic-bezier(.2,.7,.3,1);flex:none}
+.tp-caret{position:absolute;right:13px;top:50%;transform:translateY(-50%);width:0;height:0;border-left:4.5px solid transparent;border-right:4.5px solid transparent;border-top:5.5px solid var(--secondary);transition:transform .25s cubic-bezier(.2,.7,.3,1)}
 .time-pick.open .tp-caret{transform:rotate(180deg)}
 .tp-pop{max-height:0;overflow:hidden;background:var(--glass-4);
   border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);
