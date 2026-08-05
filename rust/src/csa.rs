@@ -10,6 +10,7 @@
 
 use crate::graph::Graph;
 use crate::matcher::{resolve_city_code, resolve_single, resolve_station_set, MatcherData};
+use rayon::prelude::*;
 
 /// 多站精确解析：每站 resolve_single（精确单站），保序去重取并集。
 fn resolve_multi(
@@ -32,7 +33,7 @@ use crate::models::{
 };
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 // ── 过滤常量 ────────────────────────────────────────────
 
@@ -46,13 +47,13 @@ const CONSTRAINED_SLACK_PENALTY: i32 = 300;
 struct Label {
     station: usize,
     arrive: i32,
-    train_code: Rc<str>, // footpath 标签为空串
+    train_code: Arc<str>, // footpath 标签为空串
     first_dep: i32,
     rail_distance: i32,
     train_xfers: usize,
     inter_xfers: usize,
     inter_minutes: i32,
-    prev: Option<Rc<Label>>,
+    prev: Option<Arc<Label>>,
     conn: Option<ConnRef>, // 本跳连接（footpath 为 None）
     seg_kind: u8,          // 0=train 1=interstation
     matched_constraint: bool,
@@ -99,10 +100,10 @@ fn has_repeated_station(route: &RouteResult) -> bool {
 /// 跨车次按到达时间排序共存，截断时优先保留不同车次；
 /// 无换乘城市约束时跳过 matched 扫描（has_constraint=false 短路）。
 fn insert_round_label(
-    cur: &mut HashMap<usize, Vec<Rc<Label>>>,
-    code_arr: &mut HashMap<usize, HashMap<Rc<str>, i32>>,
+    cur: &mut HashMap<usize, Vec<Arc<Label>>>,
+    code_arr: &mut HashMap<usize, HashMap<Arc<str>, i32>>,
     station: usize,
-    cand: Rc<Label>,
+    cand: Arc<Label>,
     state_limits: Option<usize>,
     has_constraint: bool,
 ) -> bool {
@@ -175,7 +176,7 @@ fn insert_round_label(
             if let Some(limit) = state_limits {
                 if lst.len() > limit {
                     // 车次去重截断：同车次保留最早到达，再按到达时间截断
-                    let mut dedup: Vec<Rc<Label>> = Vec::new();
+                    let mut dedup: Vec<Arc<Label>> = Vec::new();
                     let mut prev_code: Option<&str> = None;
                     for lb in lst.iter() {
                         if prev_code.is_none() || lb.train_code.as_ref() != prev_code.unwrap() {
@@ -187,12 +188,12 @@ fn insert_round_label(
                         if !has_constraint || !dedup.iter().any(|lb| lb.matched_constraint) {
                             dedup.truncate(limit);
                         } else {
-                            let matched: Vec<Rc<Label>> =
+                            let matched: Vec<Arc<Label>> =
                                 dedup.iter().filter(|lb| lb.matched_constraint).cloned().collect();
                             if matched.len() >= limit {
                                 dedup = matched[..limit].to_vec();
                             } else {
-                                let mut rest: Vec<Rc<Label>> = dedup
+                                let mut rest: Vec<Arc<Label>> = dedup
                                     .iter()
                                     .filter(|lb| !lb.matched_constraint)
                                     .cloned()
@@ -205,7 +206,7 @@ fn insert_round_label(
                     }
                     *lst = dedup;
                     // 重建 code_arr 索引保持同步
-                    let m: HashMap<Rc<str>, i32> = lst
+                    let m: HashMap<Arc<str>, i32> = lst
                         .iter()
                         .map(|lb| (lb.train_code.clone(), lb.arrive))
                         .collect();
@@ -257,14 +258,42 @@ fn collapse_train_segments(graph: &Graph, conns: &[ConnRef]) -> Vec<TrainSegment
     result
 }
 
+/// 在 out_conns[f] 中定位 (code, t, dep, arr) 连接的下标（按 depart 二分）。
+/// 车次表中"缺时间边"（始发/终到缺时刻）在连接表不生成 → 返回 None。
+fn trip_conn_pos(
+    graph: &crate::graph::Graph,
+    f: usize,
+    code: &str,
+    t: usize,
+    dep: i32,
+    arr: i32,
+) -> Option<usize> {
+    let bucket = &graph.out_conns[f];
+    let lo = bucket.partition_point(|c| c.depart_minutes < dep);
+    for (k, c) in bucket[lo..].iter().enumerate() {
+        if c.depart_minutes != dep {
+            break;
+        }
+        if c.train_code == code && c.to_idx == t && c.arrive_minutes == arr {
+            return Some(lo + k);
+        }
+    }
+    for (i, c) in bucket.iter().enumerate() {
+        if c.train_code == code && c.to_idx == t && c.depart_minutes == dep && c.arrive_minutes == arr {
+            return Some(i);
+        }
+    }
+    None // 缺时间边：连接表未生成，该站对连接级不可达
+}
+
 /// 从 Label 链回溯为类型化 RouteResult（对齐 _reconstruct_from_label）。
-fn reconstruct_from_label(graph: &Graph, label: &Rc<Label>) -> Option<RouteResult> {
+fn reconstruct_from_label(graph: &Graph, label: &Arc<Label>) -> Option<RouteResult> {
     enum RawSeg {
         Train(ConnRef),
         Inter((usize, usize, i32, i32, i32, String, String)),
     }
     let mut segs_raw: Vec<RawSeg> = Vec::new();
-    let mut cur: Option<&Rc<Label>> = Some(label);
+    let mut cur: Option<&Arc<Label>> = Some(label);
     while let Some(lb) = cur {
         if lb.seg_kind == 0 {
             if let Some(cr) = lb.conn {
@@ -484,7 +513,7 @@ fn collect_direct_routes(
 
 // ── 预扫描：每换乘级别最短总耗时 ─────────────────────────
 
-type PrescanTag = (i32, Rc<str>, i32); // (arrive, code, first_departure)
+type PrescanTag = (i32, Arc<str>, i32); // (arrive, code, first_departure)
 
 /// 多标签 CSA 的"每换乘级别最短总耗时"（对齐 _prescan_best_durations）。
 ///
@@ -504,7 +533,7 @@ fn prescan_best_durations(
     // source 站含伪标签 (0, (-1, "", -1))
     let mut tags: HashMap<usize, Vec<(usize, PrescanTag)>> = HashMap::new();
     for &s in source_set {
-        tags.insert(s, vec![(0usize, (-1, Rc::<str>::from(""), -1))]);
+        tags.insert(s, vec![(0usize, (-1, Arc::<str>::from(""), -1))]);
     }
     let (earliest_depart, latest_depart) = (request.earliest_depart, request.latest_depart);
     let (earliest_arrive, latest_arrive) = (request.earliest_arrive, request.latest_arrive);
@@ -620,7 +649,7 @@ fn prescan_best_durations(
             }
         }
         let raw = &out_conns[f][pos];
-        let code = Rc::<str>::from(raw.train_code.as_str());
+        let code = Arc::<str>::from(raw.train_code.as_str());
         let t = raw.to_idx;
         let arr_m = raw.arrive_minutes;
         let nxt = pos + 1;
@@ -656,7 +685,7 @@ fn prescan_best_durations(
                                     Some(&f) => f,
                                     None => foot_time,
                                 };
-                                update!(other, arr_m + ft, Rc::<str>::from(""), first_dep, new_xfers);
+                                update!(other, arr_m + ft, Arc::<str>::from(""), first_dep, new_xfers);
                             }
                         }
                     }
@@ -686,7 +715,7 @@ fn prescan_best_durations(
                                 Some(&f) => f,
                                 None => foot_time,
                             };
-                            update!(other, arr_m + ft, Rc::<str>::from(""), first_dep, new_xfers);
+                            update!(other, arr_m + ft, Arc::<str>::from(""), first_dep, new_xfers);
                         }
                     }
                 }
@@ -752,10 +781,10 @@ fn prune_by_duration(
 /// 返回插入成功的 (other, fp_arr)——调用方须将这些站加入堆。
 #[allow(clippy::too_many_arguments)]
 fn expand_footpath(
-    cur: &mut HashMap<usize, Vec<Rc<Label>>>,
-    code_arr: &mut HashMap<usize, HashMap<Rc<str>, i32>>,
+    cur: &mut HashMap<usize, Vec<Arc<Label>>>,
+    code_arr: &mut HashMap<usize, HashMap<Arc<str>, i32>>,
     graph: &Graph,
-    cand: &Rc<Label>,
+    cand: &Arc<Label>,
     t: usize,
     arr_m: i32,
     fp_done: &mut HashSet<(usize, i32)>,
@@ -816,10 +845,10 @@ fn expand_footpath(
                 continue;
             }
         }
-        let fp = Rc::new(Label {
+        let fp = Arc::new(Label {
             station: other,
             arrive: fp_arr,
-            train_code: Rc::from(""),
+            train_code: Arc::from(""),
             first_dep: cand.first_dep,
             rail_distance: cand.rail_distance,
             train_xfers: cand.train_xfers,
@@ -930,8 +959,6 @@ pub fn search(
         prescan_best_durations(graph, request, &source_set, &target_set);
     let prescan_ms = t_prescan.elapsed().as_millis();
 
-
-    let out_conns = &graph.out_conns;
     let max_transfers = request.max_transfers;
     let rounds = max_transfers + 1;
     let state_limits = settings.max_states_per_station;
@@ -942,194 +969,167 @@ pub fn search(
     let same_buffer = request.same_station_transfer_minutes;
     let foot_time = request.interstation_transfer_minutes;
 
-    let mut round_labels: Vec<HashMap<usize, Vec<Rc<Label>>>> =
+    // ── 路线级 RAPTOR 主循环（master-v3 并行重构版）──
+    // 语义：轮 r 的登车源 = 轮 r-1 的标签（r=0 为 source 站 + 发车窗口）；
+    // 对每个"活动站出发的唯一车次"一次扫描：找到可登车站 → 沿途各站产生
+    // 到达标签（车次内续乘天然覆盖）；车次间无共享写 → 轮内可并行。
+    // 与桶化 CSA（连接级）的标签前沿一致（每站每换乘级别最早到达），
+    // 差异仅在并列标签的迭代序（对拍验证）。
+    let mut round_labels: Vec<HashMap<usize, Vec<Arc<Label>>>> =
         (0..rounds).map(|_| HashMap::new()).collect();
-    let mut dest_labels: Vec<Vec<Rc<Label>>> = (0..rounds).map(|_| Vec::new()).collect();
+    let mut dest_labels: Vec<Vec<Arc<Label>>> = (0..rounds).map(|_| Vec::new()).collect();
     let mut scanned: u64 = 0;
     let mut generated: u64 = 0;
     let mut complete = true;
     let mut stopped_reason: Option<String> = None;
-
     let has_constraint = constraint_city.is_some();
-    for r in 0..rounds {
-        let mut cur: HashMap<usize, Vec<Rc<Label>>> = HashMap::new();
-        let mut code_arr: HashMap<usize, HashMap<Rc<str>, i32>> = HashMap::new();
-        let mut fp_done: HashSet<(usize, i32)> = HashSet::new();
-        let prev_round = if r > 0 { Some(&round_labels[r - 1]) } else { None };
-        let is_first = r == 0;
 
-        // 活动站 → 桶起始位置：堆归并
-        let mut heap: BinaryHeap<Reverse<(i32, usize, usize)>> = BinaryHeap::new();
-        let mut pos_of: HashMap<usize, usize> = HashMap::new();
-        let mut earliest_of: HashMap<usize, i32> = HashMap::new();
-        if is_first {
-            for &s in &source_set {
-                let pos = out_conns[s].partition_point(|c| c.depart_minutes < earliest_depart);
-                if pos < out_conns[s].len() {
-                    heap.push(Reverse((out_conns[s][pos].depart_minutes, s, pos)));
-                    pos_of.insert(s, pos);
-                    earliest_of.insert(s, -1); // 伪标签
+    for r in 0..rounds {
+        let mut cur: HashMap<usize, Vec<Arc<Label>>> = HashMap::new();
+        let mut code_arr: HashMap<usize, HashMap<Arc<str>, i32>> = HashMap::new();
+        let mut fp_done: HashSet<(usize, i32)> = HashSet::new();
+
+        // 活动站：r=0 → source_set；r>0 → 上轮标签所在站
+        // 每个活动站 f 的登车源标签列表（r=0 用伪标签，仅约束时间窗）
+        let active: Vec<(usize, Option<Arc<Label>>)> = if r == 0 {
+            source_set.iter().map(|&s| (s, None)).collect()
+        } else {
+            round_labels[r - 1]
+                .iter()
+                .flat_map(|(f, lst)| lst.iter().map(|lb| (*f, Some(lb.clone()))))
+                .collect()
+        };
+
+        // 活动站 → 唯一出发车次（去重，保持确定性顺序：先站序后出现序）
+        let mut trips_of: Vec<(usize, Vec<Arc<str>>)> = Vec::new();
+        {
+            let mut seen_trips: HashSet<Arc<str>> = HashSet::new();
+            let mut last_f: Option<usize> = None;
+            let mut trips: Vec<Arc<str>> = Vec::new();
+            for (f, _) in &active {
+                if Some(*f) != last_f {
+                    if let Some(lf) = last_f {
+                        trips_of.push((lf, std::mem::take(&mut trips)));
+                    }
+                    seen_trips.clear();
+                    last_f = Some(*f);
+                }
+                for conn in &graph.out_conns[*f] {
+                    let code = Arc::<str>::from(conn.train_code.as_str());
+                    if seen_trips.insert(code.clone()) {
+                        trips.push(code);
+                    }
                 }
             }
-        } else if let Some(prev) = prev_round {
-            for (f, lst) in prev {
-                let min_arr = lst.iter().map(|lb| lb.arrive).min().unwrap();
-                let pos = out_conns[*f].partition_point(|c| c.depart_minutes < min_arr + same_buffer);
-                if pos < out_conns[*f].len() {
-                    heap.push(Reverse((out_conns[*f][pos].depart_minutes, *f, pos)));
-                    pos_of.insert(*f, pos);
-                    earliest_of.insert(*f, min_arr + same_buffer);
-                }
+            if let Some(lf) = last_f {
+                trips_of.push((lf, trips));
             }
         }
 
-        let mut processed: u64 = 0;
-        let mut stopped = false;
-        while let Some(Reverse((_, f, pos))) = heap.pop() {
-            if pos_of.get(&f) != Some(&pos) {
-                continue; // 过期条目
-            }
-            let bucket = &out_conns[f];
-            let is_src_ok = is_first && source_flag[f];
-            let cl = cur.get(&f).cloned(); // 快照：段内 cur[f] 不会被修改（无自环边）
-            let pl = prev_round.and_then(|p| p.get(&f)).cloned();
-            let mut pos = pos;
-            loop {
-                let raw = &bucket[pos];
-                let dep_m = raw.depart_minutes;
-                let code = Rc::<str>::from(raw.train_code.as_str());
-                let t = raw.to_idx;
-                let arr_m = raw.arrive_minutes;
-                let dist = raw.distance as i32;
-
-                processed += 1;
-                scanned += 1;
-                if processed % 20000 == 0 {
-                    // 注意：elapsed 为毫秒，timeout 为秒（Python 侧以秒比较）
-                    let elapsed_ms = t_start.elapsed().as_millis() as u64;
-                    if elapsed_ms > timeout * 1000 {
-                        stopped_reason = Some("timeout".to_string());
-                        complete = false;
-                        stopped = true;
-                        break;
-                    }
-                    if generated > state_limit {
-                        stopped_reason = Some("state_limit".to_string());
-                        complete = false;
-                        stopped = true;
-                        break;
-                    }
+        // ── 轮内：候选生成（车次级并行，只读共享状态）→ 串行归并 ──
+        let trip_items: Vec<(usize, Arc<str>)> = trips_of
+            .iter()
+            .flat_map(|(f, trips)| trips.iter().map(|c| (*f, c.clone())))
+            .collect();
+        let candidates: Vec<Vec<(usize, Arc<Label>)>> = trip_items
+            .par_iter()
+            .map(|(f, code)| {
+                let mut out: Vec<(usize, Arc<Label>)> = Vec::new();
+                let mut local_cache: HashMap<(usize, usize), Option<usize>> = HashMap::new();
+                // f 的登车源标签（r>0：上轮该站标签，按到达升序）
+                let src_labels: Vec<Arc<Label>> = if r == 0 {
+                    vec![]
+                } else {
+                    round_labels[r - 1].get(f).cloned().unwrap_or_default()
+                };
+                let stops = match graph.train_stops.get(code.as_ref()) {
+                    Some(st) => st,
+                    None => return out,
+                };
+                if stops.is_empty() {
+                    return out;
                 }
-
-                // ── 来源 1：初始登车（仅第 0 轮）──
-                if is_src_ok && earliest_depart <= dep_m && dep_m <= latest_depart {
-                    generated += 1;
-                    let rail = dist;
-                    if rail as f64 + h_dist_arr[t] <= detour_limit {
-                        let cand = Rc::new(Label {
-                            station: t,
-                            arrive: arr_m,
-                            train_code: code.clone(),
-                            first_dep: dep_m,
-                            rail_distance: rail,
-                            train_xfers: 0,
-                            inter_xfers: 0,
-                            inter_minutes: 0,
-                            prev: None,
-                            conn: Some(ConnRef { f, pos }),
-                            seg_kind: 0,
-                            matched_constraint: false,
-                        });
-                        if insert_round_label(&mut cur, &mut code_arr, t, cand.clone(), state_limits, has_constraint) {
-                            if let Some(lst_t) = cur.get(&t) {
-                                sync_heap_main(&mut heap, &mut pos_of, &mut earliest_of, out_conns, t, lst_t[0].arrive);
-                            }
-                            if !graph.same_city_of[t].is_empty() {
-                                let inserted = expand_footpath(
-                                    &mut cur, &mut code_arr, graph, &cand, t, arr_m, &mut fp_done,
-                                    &graph.same_city_of, foot_time, &h_dist_arr, &h_time_arr, detour_limit,
-                                    prune_slack, &best_durations, &target_flag,
-                                    constraint_city.as_deref(), city_of, state_limits, has_constraint,
-                                    max_transfers,
-                                );
-                                enqueue_fp_targets(&mut heap, &mut pos_of, &mut earliest_of, out_conns, &cur, &inserted);
+                // 登车点集合：r=0 → 沿途 source 站（时间窗内首个）；
+                // r>0 → 沿途站中"存在满足换乘缓冲的标签"的站（每个标签级别一次登车）
+                let mut boards: Vec<(usize, Arc<Label>, i32)> = Vec::new(); // (stops 下标, 源标签, 登车 dep)
+                if r == 0 {
+                    for (i, st) in stops.iter().enumerate() {
+                        let (s_idx, dep, _, _, _) = *st;
+                        if dep == -1 {
+                            continue; // 不停靠站
+                        }
+                        if source_flag[s_idx] && earliest_depart <= dep && dep <= latest_depart {
+                            boards.push((i, Arc::new(Label {
+                                station: s_idx,
+                                arrive: dep,
+                                train_code: code.clone(),
+                                first_dep: dep,
+                                rail_distance: 0,
+                                train_xfers: 0,
+                                inter_xfers: 0,
+                                inter_minutes: 0,
+                                prev: None,
+                                conn: None,
+                                seg_kind: 0,
+                                matched_constraint: false,
+                            }), dep));
+                        }
+                    }
+                } else {
+                    for (i, st) in stops.iter().enumerate() {
+                        let (s_idx, dep, _, _, _) = *st;
+                        if dep == -1 {
+                            continue; // 不停靠站
+                        }
+                        for lb in &src_labels {
+                            if lb.station == s_idx
+                                && lb.arrive + same_buffer <= dep
+                            {
+                                // 同车次跨轮"换乘"一律无效（同趟应续乘，路线级无此问题——同车次标签只能同车次续乘，这里换乘源必须不同车次）
+                                if lb.train_code.as_ref() == code.as_ref() {
+                                    continue;
+                                }
+                                if lb.train_xfers + lb.inter_xfers + 1 > max_transfers {
+                                    continue;
+                                }
+                                boards.push((i, lb.clone(), dep));
                             }
                         }
                     }
                 }
-
-                // ── 来源 2：同车续乘（本轮即时标签）──
-                if let Some(cl) = &cl {
-                    for lb in cl.iter() {
-                        if lb.arrive > dep_m {
-                            break; // 列表按到达升序
+                if boards.is_empty() {
+                    return out;
+                }
+                // 沿途产生标签：从每个登车点 i 到终点。
+                // 与连接级"同车次续乘"逐位等价：标签的 conn = 相邻停站连接
+                //（prev_station→t），prev 链逐站衔接（首个沿途标签 prev=登车源）。
+                for (i, lb, _board_dep) in &boards {
+                    let mut prev_lb: Arc<Label> = lb.clone();
+                    let mut prev_station = stops[*i].0;
+                    let mut prev_dep = stops[*i].1;
+                    let base_cum = stops[*i].4;
+                    for st in &stops[i + 1..] {
+                        let (t_idx, dep_j, arr, _, cum) = *st;
+                        if arr == -1 {
+                            continue; // 不停靠站
                         }
-                        if lb.train_code.as_ref() != code.as_ref() {
-                            continue;
-                        }
-                        generated += 1;
+                        let t = t_idx;
+                        let arr_m = arr;
+                        let dist = (cum - base_cum) as i32;
+                        // 剪枝：与桶化 CSA 一致
                         let rail = lb.rail_distance + dist;
                         if rail as f64 + h_dist_arr[t] > detour_limit {
                             continue;
                         }
+                        let xfers = if r == 0 { 0 } else { lb.train_xfers + 1 };
                         if prune_slack.is_some() && !target_flag[t] {
-                            if let Some(bd) = best_durations.get(lb.train_xfers).copied().flatten() {
+                            if let Some(bd) = best_durations.get(xfers).copied().flatten() {
                                 if (arr_m - lb.first_dep) as f64 + h_time_arr[t]
                                     > bd as f64 + prune_slack.unwrap() as f64
                                 {
                                     continue;
                                 }
                             }
-                        }
-                        let cand = Rc::new(Label {
-                            station: t,
-                            arrive: arr_m,
-                            train_code: code.clone(),
-                            first_dep: lb.first_dep,
-                            rail_distance: rail,
-                            train_xfers: lb.train_xfers,
-                            inter_xfers: lb.inter_xfers,
-                            inter_minutes: lb.inter_minutes,
-                            prev: Some(lb.clone()),
-                            conn: Some(ConnRef { f, pos }),
-                            seg_kind: 0,
-                            matched_constraint: lb.matched_constraint,
-                        });
-                        if insert_round_label(&mut cur, &mut code_arr, t, cand.clone(), state_limits, has_constraint) {
-                            if let Some(lst_t) = cur.get(&t) {
-                                sync_heap_main(&mut heap, &mut pos_of, &mut earliest_of, out_conns, t, lst_t[0].arrive);
-                            }
-                            if !graph.same_city_of[t].is_empty() {
-                                let inserted = expand_footpath(
-                                    &mut cur, &mut code_arr, graph, &cand, t, arr_m, &mut fp_done,
-                                    &graph.same_city_of, foot_time, &h_dist_arr, &h_time_arr, detour_limit,
-                                    prune_slack, &best_durations, &target_flag,
-                                    constraint_city.as_deref(), city_of, state_limits, has_constraint,
-                                    max_transfers,
-                                );
-                                enqueue_fp_targets(&mut heap, &mut pos_of, &mut earliest_of, out_conns, &cur, &inserted);
-                            }
-                        }
-                    }
-                }
-
-                // ── 来源 3：换乘（上一轮标签）──
-                if let Some(pl) = &pl {
-                    for lb in pl.iter() {
-                        if lb.arrive + same_buffer > dep_m {
-                            break;
-                        }
-                        if lb.train_xfers + lb.inter_xfers + 1 > max_transfers {
-                            continue;
-                        }
-                        // 同车次跨轮"换乘"一律无效（同趟应续乘）
-                        if lb.train_code.as_ref() == code.as_ref() {
-                            continue;
-                        }
-                        generated += 1;
-                        let rail = lb.rail_distance + dist;
-                        if rail as f64 + h_dist_arr[t] > detour_limit {
-                            continue;
                         }
                         let mut matched = lb.matched_constraint;
                         if constraint_city.is_some() && !matched
@@ -1137,64 +1137,60 @@ pub fn search(
                         {
                             matched = true;
                         }
-                        if prune_slack.is_some() && !target_flag[t] {
-                            let xfers_new = lb.train_xfers + 1;
-                            if let Some(bd) = best_durations.get(xfers_new).copied().flatten() {
-                                if (arr_m - lb.first_dep) as f64 + h_time_arr[t]
-                                    > bd as f64 + prune_slack.unwrap() as f64
-                                {
-                                    continue;
-                                }
-                            }
-                        }
-                        let cand = Rc::new(Label {
+                        // 相邻停站连接（连接级续乘的段）；缺时间边 → 连接级在此中断 → 本链终止
+                        let conn_pos = *local_cache
+                            .entry((prev_station, t))
+                            .or_insert_with(|| {
+                                trip_conn_pos(graph, prev_station, code.as_ref(), t, prev_dep, arr_m)
+                            });
+                        let Some(conn_pos) = conn_pos else {
+                            break;
+                        };
+                        let cand = Arc::new(Label {
                             station: t,
                             arrive: arr_m,
                             train_code: code.clone(),
                             first_dep: lb.first_dep,
                             rail_distance: rail,
-                            train_xfers: lb.train_xfers + 1,
+                            train_xfers: xfers,
                             inter_xfers: lb.inter_xfers,
                             inter_minutes: lb.inter_minutes,
-                            prev: Some(lb.clone()),
-                            conn: Some(ConnRef { f, pos }),
+                            prev: Some(prev_lb.clone()),
+                            conn: Some(ConnRef {
+                                f: prev_station,
+                                pos: conn_pos,
+                            }),
                             seg_kind: 0,
                             matched_constraint: matched,
                         });
-                        if insert_round_label(&mut cur, &mut code_arr, t, cand.clone(), state_limits, has_constraint) {
-                            if let Some(lst_t) = cur.get(&t) {
-                                sync_heap_main(&mut heap, &mut pos_of, &mut earliest_of, out_conns, t, lst_t[0].arrive);
-                            }
-                            if !graph.same_city_of[t].is_empty() {
-                                let inserted = expand_footpath(
-                                    &mut cur, &mut code_arr, graph, &cand, t, arr_m, &mut fp_done,
-                                    &graph.same_city_of, foot_time, &h_dist_arr, &h_time_arr, detour_limit,
-                                    prune_slack, &best_durations, &target_flag,
-                                    constraint_city.as_deref(), city_of, state_limits, has_constraint,
-                                    max_transfers,
-                                );
-                                enqueue_fp_targets(&mut heap, &mut pos_of, &mut earliest_of, out_conns, &cur, &inserted);
-                            }
-                        }
+                        out.push((t, cand.clone()));
+                        prev_lb = cand;
+                        prev_station = t;
+                        prev_dep = dep_j;
                     }
                 }
-
-                // 批处理推进
-                let nxt = pos + 1;
-                if nxt >= bucket.len() {
-                    break; // 本站连接耗尽
+                out
+            })
+            .collect();
+        // 归并（串行、确定性：按车次顺序）；footpath 在插入成功时统一触发
+        for cands in candidates {
+            for (t, cand) in cands {
+                generated += 1;
+                if insert_round_label(&mut cur, &mut code_arr, t, cand.clone(), state_limits, has_constraint)
+                    && !graph.same_city_of[t].is_empty()
+                {
+                    let _ = expand_footpath(
+                        &mut cur, &mut code_arr, graph, &cand, t, cand.arrive, &mut fp_done,
+                        &graph.same_city_of, foot_time, &h_dist_arr, &h_time_arr, detour_limit,
+                        prune_slack, &best_durations, &target_flag,
+                        constraint_city.as_deref(), city_of, state_limits, has_constraint,
+                        max_transfers,
+                    );
                 }
-                if let Some(top) = heap.peek() {
-                    if bucket[nxt].depart_minutes > (top.0).0 {
-                        pos_of.insert(f, nxt);
-                        heap.push(Reverse((bucket[nxt].depart_minutes, f, nxt)));
-                        break;
-                    }
-                }
-                pos = nxt;
-                pos_of.insert(f, nxt);
             }
-            if stopped {
+            if generated > state_limit {
+                stopped_reason = Some("state_limit".to_string());
+                complete = false;
                 break;
             }
         }
@@ -1310,59 +1306,6 @@ fn route_key_str(route: &RouteResult) -> String {
         .map(|s| s.seg_key())
         .collect::<Vec<_>>()
         .join("::")
-}
-
-// ── 主循环共享的堆同步（对齐 _sync_heap）──
-
-fn sync_heap_main(
-    heap: &mut BinaryHeap<Reverse<(i32, usize, usize)>>,
-    pos_of: &mut HashMap<usize, usize>,
-    earliest_of: &mut HashMap<usize, i32>,
-    out_conns: &[Vec<crate::graph::Connection>],
-    station: usize,
-    min_arr: i32,
-) {
-    let old = earliest_of.get(&station).copied();
-    if let Some(o) = old {
-        if min_arr >= o {
-            return; // 未变早
-        }
-    }
-    earliest_of.insert(station, min_arr);
-    let tp = out_conns[station].partition_point(|c| c.depart_minutes < min_arr);
-    if tp >= out_conns[station].len() {
-        return;
-    }
-    let old_pos = pos_of.get(&station).copied();
-    match old_pos {
-        None => {
-            pos_of.insert(station, tp);
-            heap.push(Reverse((out_conns[station][tp].depart_minutes, station, tp)));
-        }
-        Some(old_pos) if tp < old_pos => {
-            pos_of.insert(station, tp);
-            heap.push(Reverse((out_conns[station][tp].depart_minutes, station, tp)));
-        }
-        _ => {}
-    }
-}
-
-/// footpath 标签插入成功的站同步迭代器（对齐 _enqueue_fp_targets）。
-fn enqueue_fp_targets(
-    heap: &mut BinaryHeap<Reverse<(i32, usize, usize)>>,
-    pos_of: &mut HashMap<usize, usize>,
-    earliest_of: &mut HashMap<usize, i32>,
-    out_conns: &[Vec<crate::graph::Connection>],
-    cur: &HashMap<usize, Vec<Rc<Label>>>,
-    inserted: &[(usize, i32)],
-) {
-    for &(o, _) in inserted {
-        if let Some(lst) = cur.get(&o) {
-            if !lst.is_empty() {
-                sync_heap_main(heap, pos_of, earliest_of, out_conns, o, lst[0].arrive);
-            }
-        }
-    }
 }
 
 #[cfg(test)]

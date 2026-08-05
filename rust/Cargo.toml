@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rayon = "1.10"
 tauri = { version = "2", features = [] }
 # 更新检查/下载：HTTPS + 代理控制（仅 updater 使用；blocking 免 async runtime 依赖）
 reqwest = { version = "0.12", features = ["blocking"] }
