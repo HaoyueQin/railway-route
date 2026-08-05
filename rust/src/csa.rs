@@ -438,7 +438,7 @@ fn collect_direct_routes(
             if stops[pos].1 == -1 {
                 continue;
             }
-            let day = (dep_m - stops[pos].1) / 1440;
+            let day = (dep_m - stops[pos].1).div_euclid(1440); // Python // 语义（可为负）
             let base_cum = stops[pos].4;
             for st in &stops[pos + 1..] {
                 let (st_idx, _, arr2, _, cum) = *st;
@@ -498,8 +498,9 @@ fn prescan_best_durations(
     target_set: &HashSet<usize>,
 ) -> Vec<Option<i32>> {
     let out_conns = &graph.out_conns;
-    // 标签: station → [(xfers, (arrive, code, first_dep))]，保插入序（Python dict 保序语义：
-    // 同车次续乘的"并列最早级别"选择依赖迭代序，必须与 Python 逐位一致）
+    // 标签: station → Vec[(xfers, (arrive, code, first_dep))]，Vec 保插入序；
+    // HashMap 仅按站索引访问（不遍历），同车次续乘的"并列最早级别"选择依赖 Vec 迭代序，
+    // 必须与 Python 逐位一致
     // source 站含伪标签 (0, (-1, "", -1))
     let mut tags: HashMap<usize, Vec<(usize, PrescanTag)>> = HashMap::new();
     for &s in source_set {
@@ -601,12 +602,24 @@ fn prescan_best_durations(
         }};
     }
 
-    while let Some(Reverse((_, f, pos))) = heap.pop() {
+    while let Some(Reverse((dep_m, f, pos))) = heap.pop() {
         if pos_of.get(&f) != Some(&pos) {
-            continue; // 过期条目
+            continue; // 过期条目（回退产生），不参与早停判定（与 pyref 逐位一致）
+        }
+        // 提前终止（安全前提：双日模型中连接满足 arrive ≥ depart，跨夜已 +1440）：
+        // best_by 全部锁定后，任何新标签 duration = arr - first_dep
+        // ≥ dep_m - latest_depart（登车窗口上界）；下界超过全部基准则后续不可能改善
+        // 任何 best_by[k] → 跳过剩余连接（基准不变 → 主循环剪枝不变 → 结果集不变）。
+        if best_by.iter().all(|b| b.is_some()) {
+            let max_best = best_by.iter().filter_map(|b| *b).max().unwrap();
+            if dep_m > max_best + latest_depart {
+                if std::env::var_os("RAILWAY_ROUTE_TIMING").is_some() {
+                    eprintln!("[prescan-stop] dep_m={dep_m} max_best={max_best} latest_depart={latest_depart}");
+                }
+                break;
+            }
         }
         let raw = &out_conns[f][pos];
-        let dep_m = raw.depart_minutes;
         let code = Rc::<str>::from(raw.train_code.as_str());
         let t = raw.to_idx;
         let arr_m = raw.arrive_minutes;
@@ -636,10 +649,14 @@ fn prescan_best_durations(
                 if update!(t, arr_m, code, first_dep, new_xfers) {
                     let partners = &same_city_of[t];
                     if !partners.is_empty() {
-                        let fp_arr = arr_m + foot_time;
                         for &other in partners {
                             if other != t {
-                                update!(other, fp_arr, Rc::<str>::from(""), first_dep, new_xfers);
+                                // 与主搜索 expand_footpath 同源：按对查表（无数据回退固定值）
+                                let ft = match graph.foot_times.get(&(t, other)) {
+                                    Some(&f) => f,
+                                    None => foot_time,
+                                };
+                                update!(other, arr_m + ft, Rc::<str>::from(""), first_dep, new_xfers);
                             }
                         }
                     }
@@ -662,10 +679,14 @@ fn prescan_best_durations(
             if update!(t, arr_m, code, first_dep, new_xfers) {
                 let partners = &same_city_of[t];
                 if !partners.is_empty() {
-                    let fp_arr = arr_m + foot_time;
                     for &other in partners {
                         if other != t {
-                            update!(other, fp_arr, Rc::<str>::from(""), first_dep, new_xfers);
+                            // 与主搜索 expand_footpath 同源：按对查表（无数据回退固定值）
+                            let ft = match graph.foot_times.get(&(t, other)) {
+                                Some(&f) => f,
+                                None => foot_time,
+                            };
+                            update!(other, arr_m + ft, Rc::<str>::from(""), first_dep, new_xfers);
                         }
                     }
                 }
@@ -688,6 +709,7 @@ fn prescan_best_durations(
     }
 
     // 前缀最小化：best[k] = k 转"以内"的最短耗时
+    let raw_best = best_by.clone();
     let mut cur: Option<i32> = None;
     for k in 0..=max_transfers {
         if let Some(b) = best_by[k] {
@@ -696,6 +718,9 @@ fn prescan_best_durations(
             }
         }
         best_by[k] = cur;
+    }
+    if std::env::var_os("RAILWAY_ROUTE_TIMING").is_some() {
+        eprintln!("[prescan] raw_best={raw_best:?} final={best_by:?}");
     }
     best_by
 }
@@ -729,7 +754,7 @@ fn prune_by_duration(
 fn expand_footpath(
     cur: &mut HashMap<usize, Vec<Rc<Label>>>,
     code_arr: &mut HashMap<usize, HashMap<Rc<str>, i32>>,
-    _graph: &Graph,
+    graph: &Graph,
     cand: &Rc<Label>,
     t: usize,
     arr_m: i32,
@@ -764,7 +789,12 @@ fn expand_footpath(
         if other == t {
             continue;
         }
-        let fp_arr = arr_m + foot_time;
+        // 5.1-1 异站换乘按对估算：直达/坐标预计算表（无数据对回退固定值）
+        let ft = match graph.foot_times.get(&(t, other)) {
+            Some(&f) => f,
+            None => foot_time,
+        };
+        let fp_arr = arr_m + ft;
         if cand.rail_distance as f64 + h_dist_arr[other] > detour_limit {
             continue;
         }
@@ -794,7 +824,7 @@ fn expand_footpath(
             rail_distance: cand.rail_distance,
             train_xfers: cand.train_xfers,
             inter_xfers: cand.inter_xfers + 1,
-            inter_minutes: cand.inter_minutes + foot_time,
+            inter_minutes: cand.inter_minutes + ft,
             prev: Some(cand.clone()),
             conn: None,
             seg_kind: 1,
@@ -895,8 +925,10 @@ pub fn search(
 
 
     // 耗时剪枝基准：预扫描锁定"每换乘级别的最短总耗时"
+    let t_prescan = std::time::Instant::now();
     let best_durations: Vec<Option<i32>> =
         prescan_best_durations(graph, request, &source_set, &target_set);
+    let prescan_ms = t_prescan.elapsed().as_millis();
 
 
     let out_conns = &graph.out_conns;
@@ -1251,6 +1283,12 @@ pub fn search(
     }
 
     let returned = all_routes.len();
+    if std::env::var_os("RAILWAY_ROUTE_TIMING").is_some() {
+        eprintln!(
+            "[timing] prescan={prescan_ms}ms total={}ms scanned={scanned} generated={generated}",
+            t_start.elapsed().as_millis()
+        );
+    }
     Ok(SearchResponse {
         routes: all_routes,
         complete,
@@ -1323,6 +1361,31 @@ fn enqueue_fp_targets(
             if !lst.is_empty() {
                 sync_heap_main(heap, pos_of, earliest_of, out_conns, o, lst[0].arrive);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// day 计算必须与 Python `//`（向下取整）一致：`(dep - base) // 1440`。
+    /// Rust `/` 向零截断，负值场景（凌晨班次参照前日停靠）会产生 -1 天偏差。
+    #[test]
+    fn day_calc_matches_python_floor_div() {
+        let cases: &[(i32, i32, i32)] = &[
+            (1440, 0, 1),     // 整除
+            (1500, 0, 1),     // 正余数
+            (-1, 0, -1),      // Python -1//1440 = -1；Rust -1/1440 = 0
+            (-1440, 0, -1),   // 整除负
+            (1200, 1440, -1), // 凌晨班次参照前日停靠
+            (0, 2880, -2),    // 跨两日
+        ];
+        for &(dep, base, expect) in cases {
+            assert_eq!((dep - base).div_euclid(1440), expect, "dep={dep} base={base}");
+            assert_eq!(
+                (dep - base).div_euclid(1440),
+                ((dep - base) as f64 / 1440.0).floor() as i32,
+                "div_euclid != floor 语义: dep={dep} base={base}"
+            );
         }
     }
 }

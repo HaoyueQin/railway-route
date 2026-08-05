@@ -20,6 +20,7 @@ from pyref.graph import RailwayGraph  # noqa: E402
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 CSV = os.path.join(ROOT, "data", "output", "车次时刻表.csv")
 JS = os.path.join(ROOT, "data", "timetable", "station_name.js")
+COORDS = os.path.join(ROOT, "data", "station_coords.json")
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(__file__), "m2_baseline.json")
 SEED = 20260801
@@ -28,6 +29,7 @@ SEED = 20260801
 def main():
     g = RailwayGraph()
     g.build(CSV, JS)
+    g.load_coords(COORDS)
     n = g.station_count
     idx_to_name = g.idx_to_station
 

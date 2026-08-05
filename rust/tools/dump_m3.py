@@ -33,6 +33,7 @@ from pyref.models import (  # noqa: E402
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 CSV = os.path.join(ROOT, "data", "output", "车次时刻表.csv")
 JS = os.path.join(ROOT, "data", "timetable", "station_name.js")
+COORDS = os.path.join(ROOT, "data", "station_coords.json")
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(__file__), "m3_baseline.json")
 SEED = 42  # 与 qa_sweep 默认一致
@@ -142,8 +143,9 @@ def main():
     t0 = time.perf_counter()
     graph = RailwayGraph()
     graph.build(CSV, JS)
+    graph.load_coords(COORDS)
     matcher = build_matcher(graph, JS)
-    print(f"{time.perf_counter() - t0:.1f}s")
+    print(f"{time.perf_counter() - t0:.1f}s（坐标 {len(graph.coords)} 站 / 同城对 {len(graph.interstation_minutes)}）")
 
     rng = random.Random(SEED)
     combos = build_combos(graph, rng)

@@ -66,6 +66,8 @@ class RailwayGraph:
         self.idx_to_station: list[str] = []
         # 同城车站分组: city_code → [station_name]
         self.city_groups: dict[str, list[str]] = defaultdict(list)
+        # 电报码 → 站名（station_name.js parts[2]，坐标按电报码索引）
+        self.telecode_to_name: dict[str, str] = {}
         # 站点/城市反向索引（build 后仅包含图中有效车站）
         self.station_to_city_code: dict[int, str] = {}
         self.city_code_to_name: dict[str, str] = {}
@@ -93,6 +95,12 @@ class RailwayGraph:
         self.out_conns: list[list] = []
         # 目标站 → 各站最短铁路距离（反向 Dijkstra 结果）
         self.distance_cache: dict[int, dict[int, float]] = {}
+        # 5.1-1 异站换乘按距离估算：站 idx → (lat, lng)（12306 GCJ-02）
+        self.coords: dict[int, tuple[float, float]] = {}
+        # 同城站对 → 估算换乘分钟（无直达班次时的距离估算，load_coords 时预计算）
+        self.interstation_minutes: dict[tuple[int, int], int] = {}
+        # 同城站对 → 确定性换乘分钟（直达班次/坐标距离预计算；无数据对回退用户配置）
+        self.foot_times: dict[tuple[int, int], int] = {}
 
     # ── 构建 ────────────────────────────────────────────
 
@@ -122,7 +130,9 @@ class RailwayGraph:
             name = parts[1]       # 中文站名
             city_code = parts[6]  # 城市代码（如 "0357" 表示北京）
             city_name = parts[7] if len(parts) > 7 else ""
+            telecode = parts[2]   # 电报码
             self.city_groups[city_code].append(name)
+            self.telecode_to_name[telecode] = name
             if city_name:
                 self.city_code_to_name[city_code] = city_name
 
@@ -419,12 +429,53 @@ class RailwayGraph:
         self, from_idx: int, to_idx: int,
         default_minutes: int = DEFAULT_INTER_TRANSFER_MINUTES
     ) -> int:
-        """异站换乘时间估算：查有无直达班次，有则取最短旅行时间+30分钟，否则用默认值。"""
-        key = (from_idx, to_idx)
-        if key in self.edge_trains:
-            min_travel = min(te.travel_minutes for te in self.edge_trains[key])
-            return min_travel + 30
+        """异站换乘时间估算：
+        1) 有直达班次 → 最短旅行时间 + 30 分钟（同城有市郊/城际线，坐车比地面快）；
+        2) 无直达班次但同城有坐标 → 按直线距离估算（10km 内 30min，每 10km +15min）；
+        3) 数据不足 → 回退默认值。"""
+        edge = self.edges.get(from_idx, {}).get(to_idx)
+        if edge is not None:
+            return edge.min_time + 30
+        if (from_idx, to_idx) in self.interstation_minutes:
+            return self.interstation_minutes[(from_idx, to_idx)]
         return default_minutes
+
+    def load_coords(self, json_path: str):
+        """加载车站坐标（data/station_coords.json，12306 GCJ-02）并预计算同城站对换乘分钟。
+        文件缺失/格式异常时静默跳过（回退固定换乘时间，不阻断启动）。"""
+        import json as _json
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                data = _json.load(f)
+        except (OSError, ValueError):
+            return
+        # 电报码索引（两数据源同体系，比站名匹配更可靠）
+        matched = 0
+        for code, rec in data.items():
+            try:
+                lat, lng = float(rec["lat"]), float(rec["lng"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            name = self.telecode_to_name.get(code)
+            if name is None:
+                continue
+            idx = self.station_to_idx.get(name)
+            if idx is not None:
+                self.coords[idx] = (lat, lng)
+                matched += 1
+        print(f"坐标加载: {matched} 站（电报码索引）")
+        for a, b in self.transfer_edges:
+            ca, cb = self.coords.get(a), self.coords.get(b)
+            if ca is not None and cb is not None:
+                d = haversine_km(ca, cb)
+                self.interstation_minutes[(a, b)] = est_transfer_minutes(d)
+        # 确定性换乘分钟预计算（直达班次/坐标距离；无数据对搜索时回退用户配置）
+        for a, b in self.transfer_edges:
+            edge = self.edges.get(a, {}).get(b)
+            if edge is not None:
+                self.foot_times[(a, b)] = edge.min_time + 30
+            elif (a, b) in self.interstation_minutes:
+                self.foot_times[(a, b)] = self.interstation_minutes[(a, b)]
 
     def is_same_city(self, a: int, b: int) -> bool:
         """判断两个车站是否同城。"""
@@ -447,6 +498,32 @@ class RailwayGraph:
 
 
 # ── 模块级辅助函数 ──────────────────────────────────────
+
+def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """直线距离（km，Haversine）。坐标来自 12306（GCJ-02 偏移量级 ~500m，
+    对 10km 级换乘估算误差 <5%，可接受；如需高精度可后续转 WGS84）。"""
+    import math
+
+    r = 6371.0
+    la1, lo1 = math.radians(a[0]), math.radians(a[1])
+    la2, lo2 = math.radians(b[0]), math.radians(b[1])
+    dlat, dlon = la2 - la1, lo2 - lo1
+    h = math.sin(dlat / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlon / 2) ** 2
+    # 浮点误差可能使 h 略超 [0,1]，clamp 防 asin 抛 ValueError
+    return 2 * r * math.asin(math.sqrt(max(0.0, min(1.0, h))))
+
+
+def est_transfer_minutes(dist_km: float) -> int:
+    """距离 → 地面换乘估算分钟（交接文档 5.1-1 约定：10km 内 30min，
+    每 10km +15min；上限 180min 防极端站对）。"""
+    m = 30 + math_ceil(max(0.0, dist_km - 10.0) / 10.0) * 15
+    return min(m, 180)
+
+
+def math_ceil(x: float) -> int:
+    """向上取整（避免顶部 import math 影响模块加载，保持最小依赖）。"""
+    return -int(-x // 1)
+
 
 def _parse_minutes(t: str) -> int:
     """解析 HH:MM 为分钟数，空字符串或无效值返回 0。"""

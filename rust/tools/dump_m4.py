@@ -8,10 +8,14 @@ dump 完整 API payload（含错误路径的 status/error），Rust 侧逐字段
 用法: python rust/tools/dump_m4.py [输出路径]
 默认输出: rust/tools/m4_baseline.json
 """
+import dataclasses
 import json
 import os
 import sys
 import time
+
+# 无方案自动升级链（对齐 Rust api.rs next_profile）
+NEXT_PROFILE = {"fast": "balanced", "balanced": "thorough", "thorough": "complete"}
 
 # pyref：Rust 对拍的 Python 参考实现（master 的 src/ 子集）
 sys.path.insert(0, os.path.dirname(__file__))
@@ -25,6 +29,7 @@ from pyref.validation import RequestValidationError, build_search_request  # noq
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 CSV = os.path.join(ROOT, "data", "output", "车次时刻表.csv")
 JS = os.path.join(ROOT, "data", "timetable", "station_name.js")
+COORDS = os.path.join(ROOT, "data", "station_coords.json")
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(__file__), "m4_baseline.json")
 
@@ -38,6 +43,10 @@ SEARCH_CASES = [
     dict(from_="哈尔滨", to="北京", arr_before="06:00"),
     dict(from_="武汉", to="郑州", transfer_city="西安"),
     dict(from_="北京", to="上海", max_transfers=2, search_profile="thorough"),
+    # 自动升级语义：fast 有方案（state_limit 600k 后已完整）→ 不升级
+    dict(from_="嘉峪关", to="三亚", search_profile="fast"),
+    # 超大规模查询：fast 未完整但有方案（complete=false，不升级，前端提示"搜索未完整"）
+    dict(from_="北京", to="广州", search_profile="fast"),
     dict(from_="深圳东", to="三明", search_profile="thorough"),
     dict(from_="燕郊", to="北京"),
     dict(from_="怀柔", to="北京"),
@@ -63,29 +72,43 @@ TRAIN_CASES = ["G1", "K1620/K1621", "Z9818", "NONEXIST"]
 
 
 def run_search(graph, matcher, flat):
-    """复现 APIHandler._search 的完整流程（含错误路径）。"""
+    """复现 APIHandler._search 的完整流程（含无方案自动升级，对齐 Rust run_with_upgrade）。"""
     t0 = time.time()
     try:
         request = build_search_request(flat)
     except RequestValidationError as ve:
         return {"status": 400, "error": {"code": ve.code, "message": ve.message}}
     try:
-        response = csa_search(graph, request, matcher)
+        # 无方案自动升级链（fast→balanced→thorough→complete；complete 无方案 = 真实无路）
+        upgraded = False
+        cur = request
+        response = csa_search(graph, cur, matcher)
+        while not response.routes and not response.metadata.complete:
+            nxt = NEXT_PROFILE.get(cur.search_profile)
+            if nxt is None:
+                break
+            cur = dataclasses.replace(cur, search_profile=nxt)
+            upgraded = True
+            response = csa_search(graph, cur, matcher)
         scored = score_routes(list(response.routes))
         results = [typed_route_to_dict(r, s) for s, r in scored]
+        payload = {
+            "routes": results,
+            "time": round(time.time() - t0, 1),
+            "source_stations": list(response.source_stations),
+            "target_stations": list(response.target_stations),
+            "complete": response.metadata.complete,
+            "profile": response.metadata.profile,
+            "scanned": response.metadata.scanned_connections,
+            "generated": response.metadata.generated_states,
+            "cached": False,
+        }
+        if upgraded:
+            payload["upgraded"] = True
+            payload["requested_profile"] = request.search_profile
         return {
             "status": 200,
-            "payload": {
-                "routes": results,
-                "time": round(time.time() - t0, 1),
-                "source_stations": list(response.source_stations),
-                "target_stations": list(response.target_stations),
-                "complete": response.metadata.complete,
-                "profile": response.metadata.profile,
-                "scanned": response.metadata.scanned_connections,
-                "generated": response.metadata.generated_states,
-                "cached": False,
-            },
+            "payload": payload,
         }
     except ValueError as e:
         msg = str(e)
@@ -122,6 +145,7 @@ def main():
     t0 = time.perf_counter()
     graph = RailwayGraph()
     graph.build(CSV, JS)
+    graph.load_coords(COORDS)
     matcher = build_matcher(graph, JS)
     print(f"{time.perf_counter() - t0:.1f}s")
 

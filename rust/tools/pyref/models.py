@@ -19,7 +19,7 @@ class SearchProfileSettings:
 
 
 SEARCH_PROFILES: dict[str, SearchProfileSettings] = {
-    "fast": SearchProfileSettings(4, None, True, 15, 200_000, 240),
+    "fast": SearchProfileSettings(4, None, True, 15, 600_000, 240),  # 2026-08-05: 200k→600k 防主流查询过早截断
     "balanced": SearchProfileSettings(8, None, True, 30, 1_500_000, 300),
     "thorough": SearchProfileSettings(16, None, False, 60, 3_000_000, 420),
     # complete 保留大标签上限与宽松时间窗（12h），仍受 state_limit 兜底

@@ -23,6 +23,7 @@
 
 import bisect
 import heapq
+import os
 import time as _time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -499,6 +500,15 @@ def _prescan_best_durations(
             continue  # 过期条目：迭代器已回退，由新条目接管
         raw = out_conns[f][pos]
         dep_m = raw[_CONN_DEP]
+        # 提前终止（安全）：best_by 全部锁定后，任何新标签 duration = arr - first_dep
+        # ≥ dep_m - latest_depart（登车窗口上界）；下界超过全部基准则后续不可能改善
+        # 任何 best_by[k] → 跳过剩余连接（基准不变 → 主循环剪枝不变 → 结果集不变）。
+        if all(b is not None for b in best_by):
+            max_best = max(b for b in best_by if b is not None)
+            if dep_m > max_best + latest_depart:
+                if os.environ.get("RAILWAY_ROUTE_TIMING"):
+                    print(f"[prescan-stop] dep_m={dep_m} max_best={max_best} latest_depart={latest_depart}", flush=True)
+                break
         code = raw[_CONN_CODE]
         t = raw[_CONN_T]
         arr_m = raw[_CONN_ARR]
@@ -542,12 +552,15 @@ def _prescan_best_durations(
         if _update(t, arr_m, code, first_dep, new_xfers):
             partners = same_city_of.get(t)
             if partners:
-                fp_arr = arr_m + foot_time
                 for other in partners:
                     if other != t:
-                        _update(other, fp_arr, "", first_dep, new_xfers)
+                        # 与主搜索 _expand_footpath 同源：按对查表（无数据回退固定值）
+                        ft = graph.foot_times.get((t, other), foot_time)
+                        _update(other, arr_m + ft, "", first_dep, new_xfers)
 
     # 前缀最小化：best[k] = k 转"以内"的最短耗时
+    if os.environ.get("RAILWAY_ROUTE_TIMING"):
+        print(f"[prescan] raw_best={list(best_by)}", flush=True)
     cur = None
     for k in range(max_transfers + 1):
         if best_by[k] is not None and (cur is None or best_by[k] < cur):
@@ -671,7 +684,9 @@ def _expand_footpath(
     for other in partners:
         if other == t:
             continue
-        fp_arr = arr_m + foot_time
+        # 5.1-1 异站换乘按对估算：直达/坐标预计算表（无数据对回退固定值）
+        ft = graph.foot_times.get((t, other), foot_time)
+        fp_arr = arr_m + ft
         if rail + h_dist_arr[other] > detour_limit:
             continue
         if _prune_by_duration(other, fp_arr, first_dep=first_dep, xfers=xfers,
@@ -692,7 +707,7 @@ def _expand_footpath(
         fp = Label(
             station=other, arrive=fp_arr, train_code="", first_dep=first_dep,
             rail_distance=rail, train_xfers=xfers, inter_xfers=cand.inter_xfers + 1,
-            inter_minutes=cand.inter_minutes + foot_time,
+            inter_minutes=cand.inter_minutes + ft,
             prev=cand, conn=None, seg_kind="interstation",
             matched_constraint=cand.matched_constraint or (
                 constraint_city is not None and city_of.get(t, "") == constraint_city))

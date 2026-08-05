@@ -7,7 +7,7 @@ use crate::csa;
 use crate::graph::Graph;
 use crate::json::Json;
 use crate::matcher::{fuzzy_match, MatcherData};
-use crate::models::{format_absolute_minutes, PathSegment, RouteResult, SearchRequest};
+use crate::models::{format_absolute_minutes, PathSegment, RouteResult, SearchRequest, SearchResponse};
 use crate::score::score_routes;
 use crate::validation::{build_search_request, ValidationError};
 use std::collections::HashMap;
@@ -111,24 +111,31 @@ fn error_json(code: &str, message: &str) -> Json {
     )
 }
 
-/// 处理 /api/search（对齐 APIHandler._search；time 字段用 elapsed 毫秒换算秒）。
-pub fn api_search(
+/// 下一档搜索强度（无方案自动升级链 fast→balanced→thorough→complete）。
+fn next_profile(p: &str) -> Option<&'static str> {
+    match p {
+        "fast" => Some("balanced"),
+        "balanced" => Some("thorough"),
+        "thorough" => Some("complete"),
+        _ => None,
+    }
+}
+
+/// 单次搜索 → (搜索响应, 完整 payload)。错误直接转 HTTP 错误响应。
+fn build_payload(
     graph: &Graph,
     matcher: &MatcherData,
-    query: &HashMap<String, String>,
-) -> (u16, Json) {
-    let t0 = std::time::Instant::now();
-    let request: SearchRequest = match build_search_request(query) {
-        Ok(r) => r,
-        Err(ValidationError { code, message }) => return (400, error_json(&code, &message)),
-    };
-    let response = match csa::search(graph, matcher, &request) {
+    request: &SearchRequest,
+    t0: std::time::Instant,
+) -> Result<(SearchResponse, Json), (u16, Json)> {
+    let response = match csa::search(graph, matcher, request) {
         Ok(resp) => resp,
         Err(msg) => {
             if msg.starts_with("未找到匹配的车站") {
-                return (400, error_json("STATION_NOT_FOUND", &msg));
+                return Err((400, error_json("STATION_NOT_FOUND", &msg)));
             }
-            return (500, error_json("INTERNAL_ERROR", &msg));
+            eprintln!("[api] internal error: {msg}"); // 日志保留内部信息，响应只回通用消息
+            return Err((500, error_json("INTERNAL_ERROR", "搜索内部错误，请重试")));
         }
     };
     let scored = score_routes(&response.routes);
@@ -171,7 +178,82 @@ pub fn api_search(
         .into_iter()
         .collect(),
     );
-    (200, payload)
+    Ok((response, payload))
+}
+
+/// 搜索 + 无方案自动升级：fast 档可能截断小站长途组合（如燕郊→玉山南），
+/// 无方案且未完整时按档位链自动升级重搜（至 complete 为止）。
+/// 升级发生时 payload 附加 requested_profile（用户所选档位）与 upgraded=true。
+fn run_with_upgrade(
+    graph: &Graph,
+    matcher: &MatcherData,
+    request: &SearchRequest,
+) -> Result<Json, (u16, Json)> {
+    let t0 = std::time::Instant::now();
+    let mut cur = request.clone();
+    let mut upgraded = false;
+    let (mut resp, mut payload) = build_payload(graph, matcher, &cur, t0)?;
+    while resp.routes.is_empty() && !resp.complete {
+        let next = match next_profile(&cur.search_profile) {
+            Some(n) => n,
+            None => break, // 已是 complete：真实无路，返回空结果
+        };
+        cur.search_profile = next.to_string();
+        upgraded = true;
+        let (r2, p2) = build_payload(graph, matcher, &cur, t0)?;
+        resp = r2;
+        payload = p2;
+    }
+    if upgraded {
+        if let Json::Object(ref mut o) = payload {
+            o.insert("upgraded".to_string(), Json::Bool(true));
+            o.insert(
+                "requested_profile".to_string(),
+                Json::String(request.search_profile.clone()),
+            );
+        }
+    }
+    Ok(payload)
+}
+
+/// 处理 /api/search（对齐 APIHandler._search；time 字段用 elapsed 毫秒换算秒）。
+/// `cache` 为 Some((缓存, 数据指纹)) 时启用结果缓存：同参数重复查询秒回，
+/// 命中时返回缓存体并把 cached 置 true（对齐 Python SearchCache 语义）。
+pub fn api_search(
+    graph: &Graph,
+    matcher: &MatcherData,
+    query: &HashMap<String, String>,
+    cache: Option<(&mut crate::cache::SearchCache, &str)>,
+) -> (u16, Json) {
+    let request: SearchRequest = match build_search_request(query) {
+        Ok(r) => r,
+        Err(ValidationError { code, message }) => return (400, error_json(&code, &message)),
+    };
+    // ── 查询缓存（同参数重复查询秒回；数据更新后指纹变化自动失效）──
+    if let Some((c, fp)) = cache {
+        let key = crate::cache::request_key(&request, fp);
+        if let Some(body) = c.get(&key) {
+            match crate::json::parse(body) {
+                Ok(mut obj) => {
+                    if let Json::Object(ref mut o) = obj {
+                        o.insert("cached".to_string(), Json::Bool(true));
+                    }
+                    return (200, obj);
+                }
+                Err(e) => eprintln!("[cache] parse 失败: {e} (len={})", body.len()),
+            }
+        }
+        let payload = match run_with_upgrade(graph, matcher, &request) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        c.put(key, payload.to_string());
+        return (200, payload);
+    }
+    match run_with_upgrade(graph, matcher, &request) {
+        Ok(payload) => (200, payload),
+        Err(e) => e,
+    }
 }
 
 /// 处理 /api/match（对齐 APIHandler._match：默认前 15 个建议，limit 可放大）。

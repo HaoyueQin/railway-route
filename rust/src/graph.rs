@@ -6,8 +6,10 @@
 //!   sorted_conns 225,454 / out_conns 非空桶 3,296 / 0 距离边跳过 1,241
 
 use crate::data::{parse_minutes, parse_timetable_csv_ordered, parse_station_names_full};
+use crate::json::Json;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 
 /// 同站换乘默认缓冲（分钟）——M3 CSA 换乘语义使用
@@ -74,6 +76,8 @@ pub struct Graph {
     // 同城换乘边（有向两两互联）集合 + 列表
     pub transfer_edge_set: HashSet<(usize, usize)>,
     pub transfer_edges: Vec<(usize, usize)>,
+    // 电报码 → 站名（station_name.js parts[2]，坐标按电报码索引）
+    pub telecode_to_name: HashMap<String, String>,
     // 快速索引: station_idx → [同城其他车站 idx]（不含自己）
     pub same_city_of: Vec<Vec<usize>>,
     // 出发索引: station_idx → [(车次, 序号, 发车 HH:MM)]
@@ -88,6 +92,13 @@ pub struct Graph {
     // 单目标距离下界缓存: target → 各站最短铁路距离（M3 直达枚举使用）
     #[allow(dead_code)]
     distance_cache: HashMap<usize, HashMap<usize, u64>>,
+    // 5.1-1 异站换乘按距离估算：站 idx → GCJ-02 经纬度（12306 getStationAddress 抓取）
+    pub coords: HashMap<usize, (f64, f64)>,
+    // 同城站对 → 估算换乘分钟（无直达班次时的距离估算，构建时预计算）
+    pub interstation_minutes: HashMap<(usize, usize), i32>,
+    // 同城站对 → 确定性换乘分钟（直达班次/坐标距离分支预计算；
+    // 无数据的站对搜索时回退用户配置值——footpath 热点查表）
+    pub foot_times: HashMap<(usize, usize), i32>,
 }
 
 /// 城市行政后缀（用于同城归属判断）
@@ -106,12 +117,16 @@ impl Graph {
             edge_trains: HashMap::new(),
             transfer_edge_set: HashSet::new(),
             transfer_edges: Vec::new(),
+            telecode_to_name: HashMap::new(),
             same_city_of: Vec::new(),
             departures: Vec::new(),
             train_stops: HashMap::new(),
             sorted_connections: Vec::new(),
             out_conns: Vec::new(),
             distance_cache: HashMap::new(),
+            coords: HashMap::new(),
+            interstation_minutes: HashMap::new(),
+            foot_times: HashMap::new(),
         }
     }
 
@@ -155,10 +170,11 @@ impl Graph {
 
     fn load_station_cities(&mut self, path: &Path) -> Result<(), String> {
         for e in parse_station_names_full(path)? {
-            self.city_groups.entry(e.city_code.clone()).or_default().push(e.name);
+            self.city_groups.entry(e.city_code.clone()).or_default().push(e.name.clone());
             if !e.city_name.is_empty() {
                 self.city_code_to_name.insert(e.city_code, e.city_name);
             }
+            self.telecode_to_name.insert(e.telecode.to_uppercase(), e.name);
         }
         Ok(())
     }
@@ -451,23 +467,99 @@ impl Graph {
         self.edges.get(&(from_idx, to_idx))
     }
 
-    /// 异站换乘时间估算：有直达班次 → 最短旅行时间 + 30 分钟，否则默认值。
+    /// 异站换乘时间估算：
+    /// 1) 有直达班次 → 最短旅行时间 + 30 分钟（同城有市郊/城际线，坐车比地面快）；
+    ///    预计算 edges.min_time 查表（O(1)），避免每次遍历车次列表——footpath 热点；
+    /// 2) 无直达班次但同城有坐标 → 按直线距离估算（10km 内 30min，每 10km +15min）；
+    /// 3) 数据不足 → 回退用户配置默认值。
     pub fn get_interstation_transfer_time(
         &self,
         from_idx: usize,
         to_idx: usize,
         default_minutes: i32,
     ) -> i32 {
-        if let Some(trains) = self.edge_trains.get(&(from_idx, to_idx)) {
-            let min_travel = trains.iter().map(|te| te.travel_minutes).min().unwrap_or(0);
-            return min_travel + 30;
+        if let Some(edge) = self.edges.get(&(from_idx, to_idx)) {
+            return edge.min_time + 30;
+        }
+        if let Some(&m) = self.interstation_minutes.get(&(from_idx, to_idx)) {
+            return m;
         }
         default_minutes
+    }
+
+    /// 加载车站坐标（data/station_coords.json，12306 GCJ-02）并预计算同城站对换乘分钟。
+    /// 文件缺失/格式异常时静默跳过（回退固定换乘时间，不阻断启动）。
+    pub fn load_coords(&mut self, path: &Path) {
+        let Ok(text) = fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(obj) = crate::json::parse(&text) else {
+            eprintln!("坐标文件格式无效，跳过：{}", path.display());
+            return;
+        };
+        let Json::Object(map) = obj else {
+            return;
+        };
+        // 电报码索引（两数据源同体系，比站名匹配更可靠）：
+        // 电报码 → 路路通站名 → 图内站 idx
+        let mut matched = 0usize;
+        for (code, v) in map {
+            let Json::Object(fields) = v else { continue };
+            let (Some(Json::Number(lat)), Some(Json::Number(lng))) =
+                (fields.get("lat"), fields.get("lng"))
+            else {
+                continue;
+            };
+            let name = match self.telecode_to_name.get(&code.to_uppercase()) {
+                Some(n) => n.as_str(),
+                None => continue,
+            };
+            if let Some(&idx) = self.station_to_idx.get(name) {
+                self.coords.insert(idx, (*lat, *lng));
+                matched += 1;
+            }
+        }
+        eprintln!("坐标加载: {} 站（电报码索引）", matched);
+        // 同城站对距离 → 换乘分钟（仅对图中有效的同城对有坐标的站对）
+        for &(a, b) in &self.transfer_edges {
+            if let (Some(ca), Some(cb)) = (self.coords.get(&a), self.coords.get(&b)) {
+                let d = haversine_km(*ca, *cb);
+                self.interstation_minutes.insert((a, b), est_transfer_minutes(d));
+            }
+        }
+        // 确定性换乘分钟预计算（直达班次/坐标距离；无数据对搜索时回退用户配置）
+        for &(a, b) in &self.transfer_edges {
+            if let Some(edge) = self.edges.get(&(a, b)) {
+                self.foot_times.insert((a, b), edge.min_time + 30);
+            } else if let Some(&m) = self.interstation_minutes.get(&(a, b)) {
+                self.foot_times.insert((a, b), m);
+            }
+        }
     }
 
     pub fn is_same_city(&self, a: usize, b: usize) -> bool {
         self.transfer_edge_set.contains(&(a, b)) || self.transfer_edge_set.contains(&(b, a))
     }
+}
+
+/// 直线距离（km，Haversine）。坐标来自 12306（GCJ-02 偏移量级 ~500m，
+/// 对 10km 级换乘估算误差 <5%，可接受；如需高精度可后续转 WGS84）。
+fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+    const R: f64 = 6371.0;
+    let (la1, lo1) = (a.0.to_radians(), a.1.to_radians());
+    let (la2, lo2) = (b.0.to_radians(), b.1.to_radians());
+    let dlat = la2 - la1;
+    let dlon = lo2 - lo1;
+    let h = (dlat / 2.0).sin().powi(2) + la1.cos() * la2.cos() * (dlon / 2.0).sin().powi(2);
+    // 浮点误差可能使 h 略超 [0,1]，clamp 防 asin(NaN)
+    2.0 * R * h.clamp(0.0, 1.0).sqrt().asin()
+}
+
+/// 距离 → 地面换乘估算分钟（交接文档 5.1-1 约定：10km 内 30min，每 10km +15min，
+/// 上限 180min 防极端站对）。
+fn est_transfer_minutes(dist_km: f64) -> i32 {
+    let m = 30 + ((dist_km - 10.0).max(0.0) / 10.0).ceil() as i32 * 15;
+    m.min(180)
 }
 
 #[derive(Debug, Clone, Copy)]

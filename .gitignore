@@ -3,6 +3,7 @@
 # 数据文件（过大，不入库，需自行获取）
 data/timetable/
 data/output/
+data/station_coords.json
 
 # Handover 文档（本地参考，不入库）
 HANDOVER.md
@@ -17,6 +18,9 @@ Thumbs.db
 gui-test-screenshots/
 .reasonix/
 .zcode/
+
+# 备份文件
+*.bak
 *.pyc
 __pycache__/
 data/w.db

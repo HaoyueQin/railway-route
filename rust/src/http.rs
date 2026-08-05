@@ -81,7 +81,11 @@ fn handle_connection(
     graph: &Graph,
     matcher: &MatcherData,
     web_dir: &std::path::Path,
+    cache: &mut crate::cache::SearchCache,
+    fingerprint: &str,
 ) {
+    // 安全：本地服务设读超时，防止连接占着不发送请求头而永久阻塞唯一服务线程（本地 DoS）
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
@@ -117,7 +121,7 @@ fn handle_connection(
     // 路由（对齐 APIHandler.do_GET）
     let (status, content_type, body): (u16, String, Vec<u8>) = match path {
         "/api/search" => {
-            let (status, payload) = api::api_search(graph, matcher, &query);
+            let (status, payload) = api::api_search(graph, matcher, &query, Some((cache, fingerprint)));
             let body = payload.to_string().into_bytes();
             (status, "application/json; charset=utf-8".to_string(), body)
         }
@@ -170,8 +174,12 @@ pub fn serve_with_cb(
     matcher: &MatcherData,
     web_dir: &std::path::Path,
     port: u16,
+    csv_path: &std::path::Path,
     on_ready: impl FnOnce(u16),
 ) -> std::io::Result<()> {
+    // 5.2-1 M7 缓存：HTTP 模式同样启用（真实用户浏览器路径），指纹=数据文件 mtime+size
+    let mut cache = crate::cache::SearchCache::new();
+    let fingerprint = crate::cache::data_fingerprint(csv_path);
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(_) => (port + 1..port.saturating_add(100))
@@ -184,7 +192,7 @@ pub fn serve_with_cb(
     on_ready(actual);
     for stream in listener.incoming() {
         match stream {
-            Ok(mut s) => handle_connection(&mut s, graph, matcher, web_dir),
+            Ok(mut s) => handle_connection(&mut s, graph, matcher, web_dir, &mut cache, &fingerprint),
             Err(_) => continue,
         }
     }
@@ -197,9 +205,10 @@ pub fn serve(
     matcher: &MatcherData,
     web_dir: &std::path::Path,
     port: u16,
+    csv_path: &std::path::Path,
 ) -> std::io::Result<u16> {
     let (tx, rx) = std::sync::mpsc::channel();
-    serve_with_cb(graph, matcher, web_dir, port, move |p| {
+    serve_with_cb(graph, matcher, web_dir, port, csv_path, move |p| {
         let _ = tx.send(p);
     })?;
     Ok(rx.recv().unwrap_or(0))

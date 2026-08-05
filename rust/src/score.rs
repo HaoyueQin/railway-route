@@ -47,3 +47,93 @@ pub fn score_routes(routes: &[RouteResult]) -> Vec<(f64, usize)> {
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     scored
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{PathSegment, TrainSegment};
+
+    fn route(
+        total_minutes: i32,
+        train_xfers: usize,
+        inter_xfers: usize,
+        rail_distance: i32,
+        inter_minutes: i32,
+        depart: i32,
+        arrive: i32,
+    ) -> RouteResult {
+        RouteResult {
+            segments: vec![PathSegment::Train(TrainSegment {
+                train_code: "G1".into(),
+                from_station: "北京南".into(),
+                to_station: "上海虹桥".into(),
+                depart_minutes: depart,
+                arrive_minutes: arrive,
+                travel_minutes: arrive - depart,
+                distance: rail_distance,
+            })],
+            actual_origin: "北京南".into(),
+            actual_destination: "上海虹桥".into(),
+            first_departure: depart,
+            final_arrival: arrive,
+            total_minutes,
+            rail_distance,
+            train_transfers: train_xfers,
+            interstation_transfers: inter_xfers,
+            interstation_minutes: inter_minutes,
+            transfer_cities: Vec::new(),
+            matched_transfer_constraint: false,
+        }
+    }
+
+    #[test]
+    fn empty_input() {
+        assert!(score_routes(&[]).is_empty());
+    }
+
+    #[test]
+    fn faster_route_scores_higher() {
+        // 白天、无换乘、同距离：4h vs 8h
+        let fast = route(240, 0, 0, 1200, 0, 480, 720);
+        let slow = route(480, 0, 0, 1200, 0, 480, 960);
+        let scored = score_routes(&[fast, slow]);
+        assert!(scored[0].0 > scored[1].0);
+    }
+
+    #[test]
+    fn night_travel_penalized() {
+        let day = route(300, 0, 0, 1000, 0, 480, 780); // 08:00-13:00
+        let night = route(300, 0, 0, 1000, 0, 1380, 240); // 23:00-04:00(+1) 全夜间
+        let scored = score_routes(&[day, night]);
+        assert!(scored[0].0 > scored[1].0);
+    }
+
+    #[test]
+    fn fewer_transfers_scores_higher() {
+        let direct = route(300, 0, 0, 1000, 0, 480, 780);
+        let xfer = route(300, 1, 0, 1000, 0, 480, 780);
+        let scored = score_routes(&[direct, xfer]);
+        assert!(scored[0].0 > scored[1].0);
+    }
+
+    #[test]
+    fn stable_order_for_ties() {
+        let a = route(300, 0, 0, 1000, 0, 480, 780);
+        let b = route(300, 0, 0, 1000, 0, 480, 780);
+        let c = route(300, 0, 0, 1000, 0, 480, 780);
+        let scored = score_routes(&[a, b, c]);
+        let idxs: Vec<usize> = scored.iter().map(|(_, i)| *i).collect();
+        assert_eq!(idxs, vec![0, 1, 2]); // 同分保持原序
+    }
+
+    #[test]
+    fn score_in_zero_one_range() {
+        let routes = vec![
+            route(200, 0, 0, 800, 0, 480, 680),
+            route(600, 3, 1, 2000, 120, 300, 900),
+        ];
+        for (s, _) in score_routes(&routes) {
+            assert!((0.0..=1.0).contains(&s));
+        }
+    }
+}

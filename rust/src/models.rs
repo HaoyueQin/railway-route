@@ -17,7 +17,10 @@ pub const PROFILES: [(&str, SearchProfileSettings); 4] = [
             max_states_per_station: Some(4),
             max_results: None,
             default_timeout_seconds: 15,
-            state_limit: 200_000,
+            // 2026-08-05 修复：200k 对主流大城市查询（generated 20-25 万）过早截断导致
+            // "搜索未完整"（如 北京南→上海虹桥 230884 > 200000）；600k 覆盖主流查询，
+            // max_states=4 仍保证快速（实测 15-30ms）
+            state_limit: 600_000,
             time_prune_slack: Some(240),
         },
     ),

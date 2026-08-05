@@ -16,7 +16,12 @@ pub fn parse_time(value: &str, default: i32) -> Result<i32, ValidationError> {
         return Ok(default);
     }
     let parts: Vec<&str> = value.split(':').collect();
-    if parts.len() != 2 {
+    // 与 Python _TIME_PATTERN ^(\d{2}):(\d{2})$ 对齐：小时/分钟必须两位数字
+    let valid_shape =
+        parts.len() == 2 && parts[0].len() == 2 && parts[1].len() == 2
+            && parts[0].chars().all(|c| c.is_ascii_digit())
+            && parts[1].chars().all(|c| c.is_ascii_digit());
+    if !valid_shape {
         return Err(ValidationError {
             code: "INVALID_TIME".into(),
             message: format!("无效时间: {value}，应为 HH:MM"),
@@ -183,4 +188,118 @@ fn multi_stations(q: &str, label: &str) -> Result<Option<Vec<String>>, Validatio
         });
     }
     Ok(Some(parts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn parse_time_valid_and_defaults() {
+        assert_eq!(parse_time("", 30).unwrap(), 30);
+        assert_eq!(parse_time("08:30", 0).unwrap(), 510);
+        assert_eq!(parse_time("23:59", 0).unwrap(), 1439);
+        assert_eq!(parse_time(" 07:00 ", 0).unwrap(), 420);
+    }
+
+    #[test]
+    fn parse_time_rejects_bad_input() {
+        for bad in ["8:30", "08:60", "24:00", "abc", "08", "08:30:00"] {
+            let e = parse_time(bad, 0).unwrap_err();
+            assert_eq!(e.code, "INVALID_TIME", "case: {bad}");
+        }
+    }
+
+    #[test]
+    fn bounded_int_bounds() {
+        assert_eq!(parse_bounded_int("", "x", 0, 1440, 15).unwrap(), 15);
+        assert_eq!(parse_bounded_int("30", "x", 0, 1440, 15).unwrap(), 30);
+        assert_eq!(parse_bounded_int("0", "x", 0, 1440, 15).unwrap(), 0);
+        assert_eq!(parse_bounded_int("1440", "x", 0, 1440, 15).unwrap(), 1440);
+        assert!(parse_bounded_int("-1", "x", 0, 1440, 15).is_err());
+        assert!(parse_bounded_int("1441", "x", 0, 1440, 15).is_err());
+        assert!(parse_bounded_int("abc", "x", 0, 1440, 15).is_err());
+    }
+
+    #[test]
+    fn build_defaults_and_overrides() {
+        let r = build_search_request(&params(&[("from", "北京"), ("to", "上海")])).unwrap();
+        assert_eq!(r.match_mode, "fuzzy");
+        assert_eq!(r.search_profile, "balanced");
+        assert_eq!(r.same_station_transfer_minutes, 15);
+        assert_eq!(r.interstation_transfer_minutes, 60);
+        assert_eq!(r.max_transfers, 3);
+        assert_eq!(r.timeout_seconds, 30);
+        assert!(r.from_stations.is_none());
+
+        let r = build_search_request(&params(&[
+            ("from", "北京"),
+            ("to", "上海"),
+            ("match_mode", "exact"),
+            ("search_profile", "fast"),
+            ("same_transfer", "10"),
+            ("inter_transfer", "45"),
+            ("max_transfers", "2"),
+            ("timeout", "60"),
+            ("dep_after", "08:00"),
+        ]))
+        .unwrap();
+        assert_eq!(r.match_mode, "exact");
+        assert_eq!(r.search_profile, "fast");
+        assert_eq!(r.same_station_transfer_minutes, 10);
+        assert_eq!(r.interstation_transfer_minutes, 45);
+        assert_eq!(r.max_transfers, 2);
+        assert_eq!(r.timeout_seconds, 60);
+        assert_eq!(r.earliest_depart, 480);
+    }
+
+    #[test]
+    fn build_rejects_bad_input() {
+        assert_eq!(
+            build_search_request(&params(&[("from", "北京")])).unwrap_err().code,
+            "MISSING_STATION"
+        );
+        assert_eq!(
+            build_search_request(&params(&[("from", "北京"), ("to", "上海"), ("match_mode", "x")]))
+                .unwrap_err()
+                .code,
+            "INVALID_MATCH_MODE"
+        );
+        assert_eq!(
+            build_search_request(&params(&[("from", "北京"), ("to", "上海"), ("search_profile", "x")]))
+                .unwrap_err()
+                .code,
+            "INVALID_SEARCH_PROFILE"
+        );
+        assert_eq!(
+            build_search_request(&params(&[("from", "北京"), ("to", "上海"), ("dep_after", "25:00")]))
+                .unwrap_err()
+                .code,
+            "INVALID_TIME"
+        );
+    }
+
+    #[test]
+    fn multi_station_split_and_limit() {
+        let r = build_search_request(&params(&[("from", "北京南,北京西,北京丰台"), ("to", "上海")]))
+            .unwrap();
+        assert_eq!(
+            r.from_stations.unwrap(),
+            vec!["北京南".to_string(), "北京西".to_string(), "北京丰台".to_string()]
+        );
+        let many: String = (0..51).map(|i| format!("站{i},")).collect();
+        assert_eq!(
+            build_search_request(&params(&[("from", &many), ("to", "上海")]))
+                .unwrap_err()
+                .code,
+            "TOO_MANY_STATIONS"
+        );
+    }
 }

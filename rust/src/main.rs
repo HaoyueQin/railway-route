@@ -17,6 +17,7 @@ mod json;
 mod matcher;
 mod models;
 mod score;
+mod cache;
 mod validation;
 
 use std::collections::{HashMap, HashSet};
@@ -41,6 +42,7 @@ fn main() {
         run_tauri(
             &data_root.join("output/车次时刻表.csv"),
             &data_root.join("timetable/station_name.js"),
+            &data_root.join("station_coords.json"),
             &web_dir,
         );
         return;
@@ -56,10 +58,11 @@ fn main() {
             .unwrap_or(8000);
         let mut g = Graph::new();
         g.build(&csv, &js).expect("构建图失败");
+        g.load_coords(&root.join("data/station_coords.json"));
         let matcher = matcher::build_matcher(&g, &js).expect("构建 matcher 失败");
         let web_dir = root.join("web");
         println!("数据加载完成（{} 站 / {} 车次）", g.station_count(), g.train_stops.len());
-        http::serve(&g, &matcher, &web_dir, port).expect("HTTP 服务失败");
+        http::serve(&g, &matcher, &web_dir, port, &csv).expect("HTTP 服务失败");
         return;
     }
 
@@ -69,6 +72,7 @@ fn main() {
     // ── M2 图构建 ──
     let mut g = Graph::new();
     g.build(&csv, &js).expect("构建图失败");
+    g.load_coords(&root.join("data/station_coords.json"));
     let conns = g.sorted_connections.len();
     let conn_buckets_nonempty = g.out_conns.iter().filter(|b| !b.is_empty()).count();
     let same_city_nonempty = g.same_city_of.iter().filter(|v| !v.is_empty()).count();
@@ -349,6 +353,8 @@ fn find_app_resources() -> (std::path::PathBuf, std::path::PathBuf) {
 pub struct AppData {
     pub graph: Graph,
     pub matcher: matcher::MatcherData,
+    pub cache: std::sync::Mutex<cache::SearchCache>,
+    pub data_fingerprint: String,
 }
 
 /// 自研 Json → serde_json（IPC 返回给前端）。
@@ -376,7 +382,10 @@ where
 
 #[tauri::command]
 fn api_search(state: tauri::State<'_, AppData>, params: std::collections::HashMap<String, String>) -> serde_json::Value {
-    api_command(|| api::api_search(&state.graph, &state.matcher, &params))
+    // poison 时取回内部值而非 panic（搜索最长 120s 持锁，其他 IPC 会等待——单窗口场景可接受）
+    let mut cache = state.cache.lock().unwrap_or_else(|e| e.into_inner());
+    let fp = state.data_fingerprint.clone();
+    api_command(|| api::api_search(&state.graph, &state.matcher, &params, Some((&mut cache, &fp))))
 }
 
 #[tauri::command]
@@ -394,16 +403,23 @@ fn api_appinfo() -> serde_json::Value {
     serde_json::json!({ "name": "railway-route", "version": env!("CARGO_PKG_VERSION") })
 }
 
-fn run_tauri(csv: &Path, js: &Path, _web_dir: &Path) {
+fn run_tauri(csv: &Path, js: &Path, coords: &Path, _web_dir: &Path) {
     let mut g = Graph::new();
     g.build(csv, js).expect("构建图失败");
+    g.load_coords(coords);
     let matcher = matcher::build_matcher(&g, js).expect("构建 matcher 失败");
     let n_stations = g.station_count();
     let n_trains = g.train_stops.len();
     println!("数据加载完成（{n_stations} 站 / {n_trains} 车次），Tauri 窗口（内置资源，零端口）");
 
+    let fp = cache::data_fingerprint(csv);
     tauri::Builder::default()
-        .manage(AppData { graph: g, matcher })
+        .manage(AppData {
+            graph: g,
+            matcher,
+            cache: std::sync::Mutex::new(cache::SearchCache::new()),
+            data_fingerprint: fp,
+        })
         .manage(updater::UpdaterState::new())
         .invoke_handler(tauri::generate_handler![
             api_search,
@@ -917,7 +933,7 @@ fn verify_m4(g: &Graph, matcher: &matcher::MatcherData, baseline_path: &Path) {
             let key = if k == "from_" { "from".to_string() } else { k.replace('_', "") };
             query.insert(key, v.as_str().unwrap().to_string());
         }
-        let (status, rust_json) = api::api_search(g, matcher, &query);
+        let (status, rust_json) = api::api_search(g, matcher, &query, None);
         let mut case_diffs: Vec<String> = Vec::new();
         let py_status = co.get("status").unwrap().as_f64().unwrap() as u16;
         if status != py_status {
